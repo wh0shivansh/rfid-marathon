@@ -1,0 +1,259 @@
+## SECURE RFID MARATHON MANAGEMENT SYSTEM (DOCKER + SUPABASE)
+
+You are a **senior software architect and security engineer** building a **high-security Army Marathon Race Management System**.
+You have **full read/write access to the entire codebase**.
+This is a **production-grade, security-critical system**.
+
+No demos. No shortcuts. No assumptions, if need clarity then ask the user.
+
+---
+
+## 🎯 OBJECTIVE
+
+Design and implement a **secure, encrypted backend + Electron desktop application workflow** that manages **RFID-based marathon race participation, timing, and integrity-safe data synchronization**, deployed using **Docker** and backed by **Supabase (PostgreSQL)**.
+
+---
+
+## 🧱 BACKEND CORE REQUIREMENTS
+
+### 1️⃣ Backend Server
+
+* Backend must be written in **Python using FastAPI**.
+* Database must be **PostgreSQL via Supabase**.
+* Backend handles **every API request** from the Electron desktop app.
+* Must be **stateless, containerized, scalable**, and production-ready.
+
+---
+
+### 2️⃣ Dockerized Deployment (MANDATORY)
+
+* Backend **must run inside Docker**.
+* Provide:
+
+  * `Dockerfile`
+  * `docker-compose.yml`
+* On container startup:
+
+  * Connect to Supabase PostgreSQL
+  * **Create required tables and schemas if they do not already exist**
+  * Perform safe, idempotent migrations (no destructive operations)
+* Backend must **fail fast** if:
+
+  * Environment variables are missing
+  * Database connection is insecure or misconfigured
+* No manual database setup allowed.
+
+---
+
+### 3️⃣ Supabase Usage Rules
+
+* Use **Supabase only as PostgreSQL (no Supabase auth)**.
+* Database credentials must be loaded via **environment variables**.
+* SSL must be enforced for all database connections.
+* No secrets hardcoded anywhere in the codebase.
+
+---
+
+## 🔐 SECURITY REQUIREMENTS (NON-NEGOTIABLE)
+
+* **All data encrypted in transit and at rest**
+* **Participant names must be encrypted**
+* **RFID tag ID is the only allowed plaintext identifier**
+* Implement:
+
+  * HTTPS
+  * Token-based authentication
+  * Secure password hashing
+  * Request signing / replay-attack protection
+  * Rate limiting
+  * Strict schema validation
+* Backend must contain **zero logical or cryptographic loopholes**.
+* Treat system as **military-grade, audit-ready**.
+
+---
+
+## 🔑 AUTHENTICATION
+
+* Electron frontend login using **username & password**
+* Credentials stored in **frontend `.env` file** (intentional constraint)
+* Backend must:
+
+  * Hash credentials
+  * Validate securely
+  * Issue short-lived access tokens
+* Tokens must be validated on **every request**.
+
+---
+
+## 🧠 BACKEND ARCHITECTURE (STRICT)
+
+Use **OOP-based, reusable, layered architecture**.
+
+Backend root directory must contain **exactly**:
+
+* `constants.py` → Global constants
+* `basefunctions.py` → Shared helpers & utilities
+* `models.py` → Pydantic schemas + DB models
+
+Mandatory structure:
+
+```
+backend/
+│
+├── main.py
+├── constants.py
+├── basefunctions.py
+├── models.py
+│
+├── services/
+│   ├── auth/
+│   ├── race/
+│   ├── rfid/
+│   ├── timing/
+│   └── encryption/
+│
+├── database/
+├── middleware/
+├── utils/
+├── tests/
+├── Dockerfile
+└── docker-compose.yml
+```
+
+* Each service must be isolated
+* No circular dependencies
+* No god objects
+* Business logic must never live in route files
+
+---
+
+## 🏃 RACE FLOW (CRITICAL)
+
+### Pre-Race
+
+* Race table exists in DB
+* No participants initially
+
+---
+
+### Registration Phase
+
+* Admin selects race **once**
+* Admin can **continuously register participants**
+* RFID scan → participant details → encrypted storage
+* Designed for **400+ registrations without screen switching**
+
+---
+
+### Race Start (RFID Device 1)
+
+* Start time:
+
+  * Stored locally in frontend cache first
+  * Then synced to backend
+* Once recorded:
+
+  * Start time becomes **immutable**
+  * Backend enforces immutability
+  * Frontend cache locks entry
+
+---
+
+### Race End (RFID Device 2)
+
+* End time:
+
+  * Stored locally first
+  * Synced to backend when available
+* Offline-first design:
+
+  * Data must survive network failure
+  * Backend must reject duplicates or tampering
+* Integrity must be preserved under all conditions
+
+---
+
+## 🖥️ FRONTEND (ELECTRON)
+
+* Secure login
+* Race selection once
+* Infinite participant registration loop
+* Encrypted local cache
+* Sync retry mechanism
+* Clear UI states:
+
+  * Registered
+  * Started
+  * Finished
+  * Pending sync / Synced
+
+---
+
+## 📄 DOCUMENTATION (MANDATORY)
+
+### 1️⃣ `sprint.md`
+
+* Break project into **sprints**
+* Each sprint includes:
+
+  * Modules
+  * Tasks
+  * Dependencies
+* Task states:
+
+  * `todo`
+  * `in-progress`
+  * `completed`
+  * `blocked`
+  * `review-later`
+
+---
+
+### 2️⃣ README FILES (THREE)
+
+#### Root `README.md`
+
+* System overview
+* Architecture
+* Security model
+* Docker + Supabase deployment
+* Data flow diagrams
+
+#### Backend `README.md`
+
+* API design
+* Services explanation
+* DB schema
+* Encryption strategy
+* Startup & migration logic
+
+#### Frontend `README.md`
+
+* UI flow
+* RFID logic
+* Offline cache
+* Sync strategy
+* Security boundaries
+
+---
+
+## 🚫 ABSOLUTE RULES
+
+* No fake encryption
+* No TODOs without documentation
+* No assumptions — decide and document
+* No insecure defaults
+* No magic values
+* No silent failures
+
+---
+
+## ✅ FINAL DELIVERABLE
+
+* Dockerized FastAPI backend
+* Supabase-backed PostgreSQL schema
+* Secure Electron workflow
+* Offline-safe RFID timing system
+* Full documentation + sprint plan
+
+This system must be **battle-ready, audit-ready, production ready, and failure-resilient**.
