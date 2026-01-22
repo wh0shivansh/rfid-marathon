@@ -106,11 +106,7 @@ backend/
 ├── models.py
 │
 ├── services/
-│   ├── auth/
-│   ├── race/
-│   ├── rfid/
-│   ├── timing/
-│   └── encryption/
+│   └── .....
 │
 ├── database/
 ├── middleware/

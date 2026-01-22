@@ -1,0 +1,16 @@
+right now we are using two different rfid devices at the start and the end but there is a big change which will change the whole backend.
+
+there are still two devices but what happens it that we are using two rfid hub devices which will call api to the backend server automatically whenever the rfid detects something. then backend has to use that rfid tag and then validate its integrety by hardcoding a key using rfid desktop manager which will be included in custom parameters from that hub, start hub and end hub will have different keys.
+
+these keys will validate that the api request is from the hub and not a user, (so password verification is not needed here but this custom parameter key is needed. which is encrypted and decryted at runtime. so the user has to send the encrypted value as a parameter)
+at the start of server always output this encrytped key value form the english password from environment variables use the env-template file to update it and also update it in the constants and models files for schema verification.
+
+now for the time stamp part first we were trying to do a handshake thing which is not needed as there is no controller in the rfid hub which supports local storing. Hence the timestamp will be recorded at the time the api is reached our server as the starting time and end time of he runner.
+
+for this rfid id listener server create a new flask server inside the backend folder only (as a microservice) which will run at port 9090 and its sole purpose is to call the backend server api endpoint (this endpoint only accepts calls from this port-9090 and no other user can call this api) after validation of the encrypted key (sent as a custom parameter from the rfid hub). This server will validate whether the custom parameter encrypted key matches the stored env key, if yes then it calls the backend server to store the timestamp in the per race table. this server cannot interact with the database.
+
+this 9090 server will not have a rate limiter as we want that every hit reaches this server so that millisecond difference in runners end timestamp can be recorded.
+
+at the end timestamp (when the starting)
+
+now to handle multiple end timestamp hits on the server

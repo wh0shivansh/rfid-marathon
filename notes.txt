@@ -1,3 +1,3 @@
 user add
 registeration for race and other
-dashboard - total racers
+dashboard - total racers, started, finished, table mai date, participants per race
