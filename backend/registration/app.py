@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from shared import (
     db, Race, RaceEntry,
     get_current_date, format_date, parse_date, format_duration,
-    RACE_STATE_IDLE, RACE_STATE_STARTED,
-    RACER_STATE_GRACE, RACER_STATE_RUNNING, RACER_STATE_FINISHED
+    RACE_STATUS_IDLE, RACE_STATUS_STARTED,
+    RACER_STATUS_GRACE, RACER_STATUS_RUNNING, RACER_STATUS_FINISHED
 )
 
 app = Flask(__name__)
@@ -193,7 +193,7 @@ def get_race_results(race_id):
         entries = RaceEntry.get_all_entries(race_id)
         
         # Filter finished racers
-        finished = [e for e in entries if e['state'] == RACER_STATE_FINISHED and e['start_time'] and e['end_time']]
+        finished = [e for e in entries if e['status'] == RACER_STATUS_FINISHED and e['start_time'] and e['end_time']]
         
         # Calculate durations and sort by finish time
         results = []
@@ -221,7 +221,7 @@ def get_race_results(race_id):
             'race_id': race_id,
             'race_name': race['race_name'],
             'race_date': str(race['race_date']),
-            'race_state': race['state'],
+            'race_status': race['status'],
             'total_finished': len(results),
             'results': results
         }), 200
@@ -241,7 +241,7 @@ def get_race_stats(race_id):
         
         entries = RaceEntry.get_all_entries(race_id)
         
-        # Count by state
+        # Count by status
         stats = {
             'total_registered': len(entries),
             'grace': 0,
@@ -252,11 +252,11 @@ def get_race_stats(race_id):
         }
         
         for entry in entries:
-            if entry['state'] == RACER_STATE_GRACE:
+            if entry['status'] == RACER_STATUS_GRACE:
                 stats['grace'] += 1
-            elif entry['state'] == RACER_STATE_RUNNING:
+            elif entry['status'] == RACER_STATUS_RUNNING:
                 stats['running'] += 1
-            elif entry['state'] == RACER_STATE_FINISHED:
+            elif entry['status'] == RACER_STATUS_FINISHED:
                 stats['finished'] += 1
             
             if entry['racer_name']:
@@ -268,7 +268,7 @@ def get_race_stats(race_id):
             'race_id': race_id,
             'race_name': race['race_name'],
             'race_date': str(race['race_date']),
-            'race_state': race['state'],
+            'race_status': race['status'],
             'statistics': stats
         }), 200
         
@@ -303,7 +303,7 @@ def get_dashboard():
         
         # Count active races
         for race in all_races:
-            if race['state'] == RACE_STATE_STARTED:
+            if race['status'] == RACE_STATUS_STARTED:
                 dashboard['active_races'] += 1
         
         # Get recent 5 races

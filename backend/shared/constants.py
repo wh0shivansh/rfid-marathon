@@ -36,14 +36,14 @@ RFID_GRACE_PERIOD_SECONDS = int(os.environ.get("RFID_GRACE_PERIOD_SECONDS", 20))
 RFID_MIN_READ_COUNT_TO_LOCK = int(os.environ.get("RFID_MIN_READ_COUNT_TO_LOCK", 3))
 RFID_NO_HIT_TIMEOUT_SECONDS = int(os.environ.get("RFID_NO_HIT_TIMEOUT_SECONDS", 20))
 
-# Race States
-RACE_STATE_IDLE = "idle"
-RACE_STATE_STARTED = "started"
+# Race Statuses
+RACE_STATUS_IDLE = "idle"
+RACE_STATUS_STARTED = "started"
 
-# Racer States
-RACER_STATE_GRACE = "grace"
-RACER_STATE_RUNNING = "running"
-RACER_STATE_FINISHED = "finished"
+# Racer Statuses
+RACER_STATUS_GRACE = "grace"
+RACER_STATUS_RUNNING = "running"
+RACER_STATUS_FINISHED = "finished"
 
 # Time Configuration
 START_TIME_CORRECTION_THRESHOLD = 10  # seconds

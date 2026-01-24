@@ -139,19 +139,6 @@ RACE_STATE_DEDUPLICATION: Final[bool] = True  # Prevent duplicate RFIDs in same 
 # Timestamp precision (milliseconds)
 TIMESTAMP_PRECISION: Final[int] = 3
 
-# Timing record states
-class TimingState(str, Enum):
-    """Enumeration of timing record states"""
-    PENDING = "pending"  # Not yet synced to backend
-    SYNCED = "synced"    # Successfully synced and confirmed
-    FAILED = "failed"    # Sync failed, needs retry
-
-# Timing point types
-class TimingPoint(str, Enum):
-    """Enumeration of timing checkpoint types"""
-    START = "start"      # Race start checkpoint
-    END = "end"          # Race finish checkpoint
-
 # ============================================================================
 # RACE CONSTANTS
 # ============================================================================
@@ -159,11 +146,9 @@ class TimingPoint(str, Enum):
 class RaceStatus(str, Enum):
     """Enumeration of race statuses"""
     CREATED = "created"           # Race created, not started
-    REGISTRATION_OPEN = "registration_open"  # Accepting registrations
-    IN_PROGRESS = "in_progress"   # Race is active
-    COMPLETED = "completed"       # Race finished
-    CANCELLED = "cancelled"       # Race cancelled
-
+    STARTED = "started"           # Race started by admin, participants are running
+    COMPLETED = "completed"       # Race completed, all participants finished
+    
 # Race distance limits (meters)
 RACE_MIN_DISTANCE_METERS: Final[int] = 10
 RACE_MAX_DISTANCE_METERS: Final[int] = 100000  # 100km max

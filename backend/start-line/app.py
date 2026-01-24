@@ -17,7 +17,7 @@ from shared import (
     db, Race, RaceEntry,
     get_current_timestamp, get_current_date, format_date, calculate_time_diff,
     RACE_STATE_IDLE, RACE_STATE_STARTED,
-    RACER_STATE_GRACE, RACER_STATE_RUNNING,
+    RACER_STATE_GRACE, RACER_STATUS_RUNNING,
     START_TIME_CORRECTION_THRESHOLD
 )
 
@@ -57,7 +57,7 @@ def rfid_hit():
             return jsonify({"error": "No race scheduled for today"}), 404
         
         race_id = race['race_id']
-        race_state = race['state']
+        race_status = race['status']
         current_time = get_current_timestamp()
         
         # Ensure race entries table exists
@@ -66,13 +66,13 @@ def rfid_hit():
         # Check if RFID already exists
         existing_entry = RaceEntry.get_by_rfid(race_id, rfid)
         
-        if race_state == RACE_STATE_IDLE:
-            # Race not started - save in grace state
+        if race_status == RACE_STATUS_IDLE:
+            # Race not started - save in grace status
             if not existing_entry:
                 entry_id = RaceEntry.insert(
                     race_id=race_id,
                     rfid=rfid,
-                    state=RACER_STATE_GRACE,
+                    status=RACER_STATUS_GRACE,
                     start_time=None
                 )
                 return jsonify({
@@ -85,17 +85,17 @@ def rfid_hit():
                 return jsonify({
                     "message": "RFID already registered",
                     "rfid": rfid,
-                    "state": existing_entry['state']
+                    "status": existing_entry['status']
                 }), 200
         
-        elif race_state == RACE_STATE_STARTED:
+        elif race_status == RACE_STATUS_STARTED:
             # Race is running
             if not existing_entry:
                 # New RFID - create entry with start time
                 entry_id = RaceEntry.insert(
                     race_id=race_id,
                     rfid=rfid,
-                    state=RACER_STATE_RUNNING,
+                    status=RACER_STATUS_RUNNING,
                     start_time=current_time
                 )
                 return jsonify({
@@ -103,7 +103,7 @@ def rfid_hit():
                     "entry_id": entry_id,
                     "rfid": rfid,
                     "start_time": current_time.isoformat(),
-                    "state": RACER_STATE_RUNNING
+                    "status": RACER_STATUS_RUNNING
                 }), 201
             else:
                 # Existing RFID - apply 10-second rule
@@ -114,7 +114,7 @@ def rfid_hit():
                         "message": "Start time set",
                         "rfid": rfid,
                         "start_time": current_time.isoformat(),
-                        "state": RACER_STATE_RUNNING
+                        "status": RACER_STATUS_RUNNING
                     }), 200
                 else:
                     # Calculate time difference from race start
@@ -130,7 +130,7 @@ def rfid_hit():
                             "rfid": rfid,
                             "start_time": current_time.isoformat(),
                             "previous_start_time": existing_entry['start_time'].isoformat(),
-                            "state": RACER_STATE_RUNNING
+                            "status": RACER_STATUS_RUNNING
                         }), 200
                     else:
                         # Ignore - within 10-second window
@@ -138,7 +138,7 @@ def rfid_hit():
                             "message": "Scan ignored (within 10-second window)",
                             "rfid": rfid,
                             "start_time": existing_entry['start_time'].isoformat(),
-                            "state": existing_entry['state']
+                            "status": existing_entry['status']
                         }), 200
         
         return jsonify({"error": "Invalid race state"}), 400

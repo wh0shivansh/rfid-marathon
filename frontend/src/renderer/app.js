@@ -533,13 +533,27 @@ function render() {
       e.preventDefault();
       const formData = Object.fromEntries(new FormData(createForm).entries());
       // Convert scheduled_date (YYYY-MM-DD) to ISO +00:00
-      const isoDate = new Date(formData.scheduled_date).toISOString().replace('Z', '+00:00');
+      const isoDate = new Date(formData.schedule_date).toISOString().replace('Z', '+00:00');
       
       // Get selected time unit and convert to seconds
       const timeUnit = document.getElementById('time-unit-selector')?.value || 'minutes';
-      const convertToSeconds = (value) => {
-        if (!value) return undefined;
-        const num = Number(value);
+      
+      // Default values in minutes (from placeholder values)
+      const defaults = {
+        age_upto30_excellent: 25,
+        age_upto30_good: 26.30,
+        age_upto30_satisfactory: 27,
+        age_upto40_excellent: 28.30,
+        age_upto40_good: 30,
+        age_upto40_satisfactory: 31,
+        age_40to45_excellent: 31.30,
+        age_40to45_good: 33,
+        age_40to45_satisfactory: 35
+      };
+      
+      const convertToSeconds = (value, fieldName) => {
+        // Use default if value is empty
+        const num = value ? Number(value) : defaults[fieldName];
         if (timeUnit === 'hours') return num * 3600;
         if (timeUnit === 'minutes') return num * 60;
         return num; // already in seconds
@@ -555,15 +569,15 @@ function render() {
             location: formData.location,
             scheduled_date: isoDate,
             description: formData.description || undefined,
-            age_upto30_excellent: convertToSeconds(formData.age_upto30_excellent),
-            age_upto30_good: convertToSeconds(formData.age_upto30_good),
-            age_upto30_satisfactory: convertToSeconds(formData.age_upto30_satisfactory),
-            age_upto40_excellent: convertToSeconds(formData.age_upto40_excellent),
-            age_upto40_good: convertToSeconds(formData.age_upto40_good),
-            age_upto40_satisfactory: convertToSeconds(formData.age_upto40_satisfactory),
-            age_40to45_excellent: convertToSeconds(formData.age_40to45_excellent),
-            age_40to45_good: convertToSeconds(formData.age_40to45_good),
-            age_40to45_satisfactory: convertToSeconds(formData.age_40to45_satisfactory),
+            age_upto30_excellent: convertToSeconds(formData.age_upto30_excellent, 'age_upto30_excellent'),
+            age_upto30_good: convertToSeconds(formData.age_upto30_good, 'age_upto30_good'),
+            age_upto30_satisfactory: convertToSeconds(formData.age_upto30_satisfactory, 'age_upto30_satisfactory'),
+            age_upto40_excellent: convertToSeconds(formData.age_upto40_excellent, 'age_upto40_excellent'),
+            age_upto40_good: convertToSeconds(formData.age_upto40_good, 'age_upto40_good'),
+            age_upto40_satisfactory: convertToSeconds(formData.age_upto40_satisfactory, 'age_upto40_satisfactory'),
+            age_40to45_excellent: convertToSeconds(formData.age_40to45_excellent, 'age_40to45_excellent'),
+            age_40to45_good: convertToSeconds(formData.age_40to45_good, 'age_40to45_good'),
+            age_40to45_satisfactory: convertToSeconds(formData.age_40to45_satisfactory, 'age_40to45_satisfactory'),
           },
         });
         showToast("Race created successfully", 'success');
@@ -874,9 +888,9 @@ function updateRaceStartCandidateDisplay(grouped) {
   const container = document.getElementById('groups-container');
   if (!container) return;
 
-  const { registered = [], started = [], completed = [] } = grouped;
+  const { registered = [], grace = [], running = [], completed = [] } = grouped;
 
-  if (registered.length === 0 && started.length === 0 && completed.length === 0) {
+  if (registered.length === 0 && grace.length === 0 && running.length === 0 && completed.length === 0) {
     container.innerHTML = '<div style="background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 12px; color: #cbd5e1; font-size: 12px;"><p style="color: #64748b; margin: 0;">No participants yet. Register participants first.</p></div>';
     return;
   }
@@ -894,11 +908,11 @@ function updateRaceStartCandidateDisplay(grouped) {
     `;
   };
 
-  // Render three sections: Registered, Started (Running), Completed
+  // Render four sections: Registered, Grace Period, Running, Completed
   const html = `
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
-      ${renderParticipantList('Registered', '#a78bfa', registered, 'No registered participants')}
-      ${renderParticipantList('Running', '#fbbf24', started, 'No runners started yet')}
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+      ${renderParticipantList('Grace Period', '#60a5fa', grace, 'No runners in grace')}
+      ${renderParticipantList('Running', '#fbbf24', running, 'No runners started yet')}
       ${renderParticipantList('Completed', '#34d399', completed, 'No finished runners yet')}
     </div>
   `;
@@ -906,24 +920,11 @@ function updateRaceStartCandidateDisplay(grouped) {
   container.innerHTML = html;
 }
 
-function renderRaceStartCandidateList(title, color, candidates, emptyText) {
-  const rows = candidates && candidates.length
-    ? candidates.map((c) => formatRaceStartCandidateRow(c, title.toLowerCase())).join('')
-    : `<p style="color: #64748b; margin: 0;">${emptyText}</p>`;
-
-  return `
-    <div style="background: #0b1222; border: 1px solid #1f2937; border-radius: 4px; padding: 8px; min-height: 60px;">
-      <div style="color: ${color}; font-size: 12px; font-weight: 600; margin-bottom: 6px;">${title}</div>
-      ${rows}
-    </div>
-  `;
-}
-
 function formatRaceStartCandidateRow(candidate, type) {
   let duration = '';
   let durationMin = '';
   
-  if (candidate.state === 'completed' && candidate.start_time && candidate.end_time) {
+  if (candidate.status === 'completed' && candidate.start_time && candidate.end_time) {
     const startTime = new Date(candidate.start_time);
     const endTime = new Date(candidate.end_time);
     const durationMs = endTime - startTime;
@@ -948,21 +949,28 @@ function formatRaceStartCandidateRow(candidate, type) {
   
   let color = '#cbd5e1';
   if (type === 'running') color = '#fbbf24';
-  else if (type === 'grace') color = '#a78bfa';
+  else if (type === 'grace period') color = '#60a5fa';
   else if (type === 'completed') color = '#34d399';
+  else if (type === 'registered') color = '#a78bfa';
   
   if (type === 'completed'){
     return `
-      <div style="display: grid; grid-template-columns: 180px 80px 80px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+      <div style="display: grid; grid-template-columns: 180px 100px 100px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
         <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
         <div>${startTimeStr}</div>
         <div>${endTimeStr}</div>
         <div>${duration}${durationMin}</div>
       </div>
     `;
+  } else if (type === 'grace period'){
+    return `
+      <div style="display: grid; grid-template-columns: 180px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+        <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
+      </div>
+    `;
   } else {
     return `
-      <div style="display: grid; grid-template-columns: 180px 80px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+      <div style="display: grid; grid-template-columns: 180px 100px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
         <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
         <div>${startTimeStr}</div>
         <div>${duration}${durationMin}</div>
@@ -972,25 +980,25 @@ function formatRaceStartCandidateRow(candidate, type) {
 }
 
 function updateRaceStartStatistics(participants) {
-  let total = participants.length;
-  let registered = 0;
-  let started = 0;
+  let registered = participants.length;
+  let grace = 0;
+  let running = 0;
   let completed = 0;
-  
+  console.log(participants);
   for (const p of participants) {
-    if (p.state === 'registered') registered++;
-    else if (p.state === 'started') started++;
-    else if (p.state === 'completed') completed++;
+    if (p.status === 'grace') grace++;
+    else if (p.status === 'running') running++;
+    else if (p.status === 'completed') completed++;
   }
   
-  const totalEl = document.getElementById('stat-total');
-  if (totalEl) totalEl.textContent = total;
-  
-  const registeredEl = document.getElementById('stat-grace');
+  const registeredEl = document.getElementById('stat-registered');
   if (registeredEl) registeredEl.textContent = registered;
   
-  const startedEl = document.getElementById('stat-locked');
-  if (startedEl) startedEl.textContent = started;
+  const graceEl = document.getElementById('stat-grace');
+  if (graceEl) graceEl.textContent = grace;
+  
+  const runningEl = document.getElementById('stat-running');
+  if (runningEl) runningEl.textContent = running;
   
   const completedEl = document.getElementById('stat-completed');
   if (completedEl) completedEl.textContent = completed;
@@ -1049,29 +1057,30 @@ async function handleRaceStartSubmit(event) {
   }
   
   try {
-    const response = await fetch('http://localhost:9090/start', {
+    await ensureAuth();
+    
+    // Call backend API to start the race group
+    const data = await apiRequest(`/races/${raceStartSelectedRaceId}/start-group`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        race_name: raceStartSelectedRaceId,
-        group_number: raceStartSelectedGroupNumber,
-        grace_period_seconds: 120
-      })
+      body: {
+        race_id: raceStartSelectedRaceId,
+        group_number: raceStartSelectedGroupNumber
+      }
     });
     
-    const data = await response.json();
-    
-    if (response.ok) {
+    if (data.success) {
       raceStartTime = new Date();
-      showToast(`✓ Started ${raceStartSelectedRaceId} - ${data.locked_candidates} running candidates`, 'success');
+      showToast(`✓ Started Group ${data.group_number} - ${data.rfids_started} runners in grace period (2 min)`, 'success');
       const startBtn = document.getElementById('start-group-btn');
       if (startBtn) startBtn.disabled = true;
+      // Refresh data to show updated times and status
+      await refreshRaceStartData();
     } else {
-      showRaceStartStatusMessage(`Failed to start group: ${data.error}`, 'error');
+      showRaceStartStatusMessage(`Failed to start group: ${data.message}`, 'error');
     }
   } catch (e) {
     console.error('Failed to start group:', e);
-    showRaceStartStatusMessage('Failed to connect to RFID server', 'error');
+    showRaceStartStatusMessage(`Failed to start group: ${e.message}`, 'error');
   }
 }
 
@@ -1088,11 +1097,12 @@ async function refreshRaceStartData() {
     // Fetch participants with timing data from backend using authenticated API request
     const participants = await apiRequest(`/race/${raceStartSelectedRaceId}/participants?include_timing=true`);
     
-    // Group participants by state for display
+    // Group participants by status for display (status values: registered, grace, running, completed)
     const grouped = {
-      registered: participants.filter(p => p.state === 'registered'),
-      started: participants.filter(p => p.state === 'started'),
-      completed: participants.filter(p => p.state === 'completed')
+      registered: participants.filter(p => p.status === 'registered'),
+      grace: participants.filter(p => p.status === 'grace'),
+      running: participants.filter(p => p.status === 'running'),
+      completed: participants.filter(p => p.status === 'completed')
     };
     updateRaceStartCandidateDisplay(grouped);
     updateRaceStartStatistics(participants);

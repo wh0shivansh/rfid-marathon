@@ -13,6 +13,7 @@ import requests
 import os
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 CORS(app)
@@ -227,8 +228,12 @@ def forward_to_backend(
         protocol: Protocol used
     """
     try:
+        # Capture current timestamp when forwarding (for accurate timing despite request queuing)
+        hit_timestamp = datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()
+        
         payload = {
             "rfid": rfid,
+            "hit_timestamp": hit_timestamp,  # Timestamp from proxy
             "antenna": antenna,
             "read_count": read_count,
             "signal_strength": signal_strength,

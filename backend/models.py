@@ -25,10 +25,7 @@ from constants import (
     PARTICIPANT_NAME_MAX_LENGTH,
     RFID_TAG_MIN_LENGTH,
     RFID_TAG_MAX_LENGTH,
-    TimingState,
-    TimingPoint,
     RaceStatus,
-    AuditAction,
 )
 from basefunctions import validate_rfid_tag, generate_uuid
 
@@ -78,16 +75,16 @@ class RaceCreateRequest(BaseModel):
     location: str = Field(..., min_length=3, max_length=200)
     scheduled_date: str = Field(..., description="ISO 8601 date")
     description: Optional[str] = Field(None, max_length=1000)
-    # Age category qualifying times (in seconds)
-    age_upto30_excellent: Optional[float] = Field(None, ge=0)
-    age_upto30_good: Optional[float] = Field(None, ge=0)
-    age_upto30_satisfactory: Optional[float] = Field(None, ge=0)
-    age_upto40_excellent: Optional[float] = Field(None, ge=0)
-    age_upto40_good: Optional[float] = Field(None, ge=0)
-    age_upto40_satisfactory: Optional[float] = Field(None, ge=0)
-    age_40to45_excellent: Optional[float] = Field(None, ge=0)
-    age_40to45_good: Optional[float] = Field(None, ge=0)
-    age_40to45_satisfactory: Optional[float] = Field(None, ge=0)
+    # Age category qualifying times (in seconds) - defaults are in minutes converted to seconds
+    age_upto30_excellent: float = Field(1500, ge=0)  # 25 min = 1500 sec
+    age_upto30_good: float = Field(1578, ge=0)  # 26.30 min = 1578 sec
+    age_upto30_satisfactory: float = Field(1620, ge=0)  # 27 min = 1620 sec
+    age_upto40_excellent: float = Field(1698, ge=0)  # 28.30 min = 1698 sec
+    age_upto40_good: float = Field(1800, ge=0)  # 30 min = 1800 sec
+    age_upto40_satisfactory: float = Field(1860, ge=0)  # 31 min = 1860 sec
+    age_40to45_excellent: float = Field(1878, ge=0)  # 31.30 min = 1878 sec
+    age_40to45_good: float = Field(1980, ge=0)  # 33 min = 1980 sec
+    age_40to45_satisfactory: float = Field(2100, ge=0)  # 35 min = 2100 sec
 
 
 class RaceUpdateRequest(BaseModel):
@@ -113,16 +110,16 @@ class RaceResponse(BaseModel):
     updated_at: datetime
     table_name: str
     participant_count: int = 0
-    # Age category qualifying times
-    age_upto30_excellent: Optional[float] = None
-    age_upto30_good: Optional[float] = None
-    age_upto30_satisfactory: Optional[float] = None
-    age_upto40_excellent: Optional[float] = None
-    age_upto40_good: Optional[float] = None
-    age_upto40_satisfactory: Optional[float] = None
-    age_40to45_excellent: Optional[float] = None
-    age_40to45_good: Optional[float] = None
-    age_40to45_satisfactory: Optional[float] = None
+    # Age category qualifying times (in seconds)
+    age_upto30_excellent: float = 1500
+    age_upto30_good: float = 1578
+    age_upto30_satisfactory: float = 1620
+    age_upto40_excellent: float = 1698
+    age_upto40_good: float = 1800
+    age_upto40_satisfactory: float = 1860
+    age_40to45_excellent: float = 1878
+    age_40to45_good: float = 1980
+    age_40to45_satisfactory: float = 2100
 
     class Config:
         from_attributes = True
@@ -191,30 +188,61 @@ class ParticipantResponse(BaseModel):
     class Config:
         from_attributes = True
 
-
-# ---------------------------------------------------------------------------
-# Timing Schemas
-# ---------------------------------------------------------------------------
-
-# NOTE: Deprecated schemas removed (January 23, 2026)
-# - TimingRecordRequest/Response: Timing now written directly to per-race participant tables
-# - SyncHandshakeRequest/Response: Listener no longer maintains state files; sync no longer needed
-
-
 # ---------------------------------------------------------------------------
 # RFID Hub Schemas
 # ---------------------------------------------------------------------------
 
 class RFIDHitRequest(BaseModel):
-    """RFID hit request from Start/End Hub"""
-    rfid_tag: str = Field(..., min_length=RFID_TAG_MIN_LENGTH, max_length=RFID_TAG_MAX_LENGTH)
-    encrypted_key: str = Field(..., min_length=1, description="Encrypted hub secret")
+    """
+    Unified RFID hit request for both START and END line hubs.
     
-    @validator('rfid_tag')
-    def validate_rfid_format(cls, v):
-        if not validate_rfid_tag(v):
+    Supports legacy format (rfid_tag only) and new format with reader_name/timing_point.
+    """
+    rfid: Optional[str] = Field(None, min_length=RFID_TAG_MIN_LENGTH, max_length=RFID_TAG_MAX_LENGTH, description="RFID tag (alternative to rfid_tag)")
+    rfid_tag: Optional[str] = Field(None, min_length=RFID_TAG_MIN_LENGTH, max_length=RFID_TAG_MAX_LENGTH, description="RFID tag identifier")
+    reader_name: Optional[str] = Field(None, description="Reader identifier: 'Reader 1' (start) or 'Reader 2' (end)")
+    timing_point: Optional[str] = Field(None, description="'start' or 'end' - Derived from reader_name if not explicitly set")
+    hit_timestamp: Optional[str] = Field(None, description="ISO timestamp when RFID was detected by proxy/listener (for accurate timing)")
+    encrypted_key: Optional[str] = Field(None, min_length=1, description="Encrypted hub secret (legacy)")
+    antenna: Optional[int] = Field(None, description="Antenna number")
+    read_count: Optional[int] = Field(None, description="Number of reads")
+    signal_strength: Optional[int] = Field(None, description="RSSI signal strength")
+    first_seen: Optional[int] = Field(None, description="First detection timestamp")
+    last_seen: Optional[int] = Field(None, description="Last detection timestamp")
+    bank_data: Optional[str] = Field(None, description="Bank data")
+    protocol: Optional[str] = Field(None, description="Protocol used")
+    
+    @validator('rfid_tag', pre=True, always=True)
+    def normalize_rfid(cls, v, values):
+        """
+        Normalize RFID field - accept both 'rfid' and 'rfid_tag', ensure uppercase.
+        If rfid_tag is not provided, use rfid field.
+        """
+        # Use rfid_tag if provided, otherwise fall back to rfid field
+        rfid_value = v or values.get('rfid')
+        if not rfid_value:
+            raise ValueError('Either rfid or rfid_tag must be provided')
+        
+        rfid_upper = str(rfid_value).upper()
+        
+        if not validate_rfid_tag(rfid_upper):
             raise ValueError('Invalid RFID tag format. Must be hexadecimal.')
-        return v.upper()
+        
+        return rfid_upper
+    
+    @validator('timing_point', pre=True, always=True)
+    def derive_timing_point(cls, v, values):
+        """Derive timing_point from reader_name if not explicitly provided"""
+        if v:
+            return str(v).lower()
+        
+        reader_name = str(values.get('reader_name', '')).lower() if values.get('reader_name') else ''
+        if 'reader 2' in reader_name or 'reader2' in reader_name or reader_name == 'end':
+            return 'end'
+        elif 'reader 1' in reader_name or 'reader1' in reader_name or reader_name == 'start':
+            return 'start'
+        
+        return 'start'  # Default to start
 
 
 class RFIDHitResponse(BaseModel):
@@ -253,7 +281,7 @@ class ParticipantResultResponse(BaseModel):
     end_time: Optional[str]
     duration_seconds: Optional[float]
     duration_formatted: Optional[str]
-    status: str  # 'registered', 'started', 'finished', 'dnf'
+    status: str  # 'registered', 'grace', 'started', 'finished', 'dnf'
 
     class Config:
         from_attributes = True
@@ -299,7 +327,7 @@ class User(Base):
 # ---------------------------------------------------------------------------
 
 class Race(Base):
-    """5KM Race table"""
+    """Different Race table"""
     __tablename__ = "races"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=generate_uuid)
@@ -310,22 +338,23 @@ class Race(Base):
     description = Column(Text, nullable=True)
     status = Column(String(50), default=RaceStatus.CREATED.value, nullable=False)
     table_name = Column(String(128), nullable=False, unique=True)  # Maps to participants table for this race
-    # Age category qualifying times (in minutes)
-    age_upto30_excellent = Column(Float, nullable=True)
-    age_upto30_good = Column(Float, nullable=True)
-    age_upto30_satisfactory = Column(Float, nullable=True)
-    age_upto40_excellent = Column(Float, nullable=True)
-    age_upto40_good = Column(Float, nullable=True)
-    age_upto40_satisfactory = Column(Float, nullable=True)
-    age_40to45_excellent = Column(Float, nullable=True)
-    age_40to45_good = Column(Float, nullable=True)
-    age_40to45_satisfactory = Column(Float, nullable=True)
+    # Age category qualifying times (in seconds) - defaults match standard race times
+    age_upto30_excellent = Column(Float, nullable=False, default=1500)  # 25 min
+    age_upto30_good = Column(Float, nullable=False, default=1578)  # 26.30 min
+    age_upto30_satisfactory = Column(Float, nullable=False, default=1620)  # 27 min
+    age_upto40_excellent = Column(Float, nullable=False, default=1698)  # 28.30 min
+    age_upto40_good = Column(Float, nullable=False, default=1800)  # 30 min
+    age_upto40_satisfactory = Column(Float, nullable=False, default=1860)  # 31 min
+    age_40to45_excellent = Column(Float, nullable=False, default=1878)  # 31.30 min
+    age_40to45_good = Column(Float, nullable=False, default=1980)  # 33 min
+    age_40to45_satisfactory = Column(Float, nullable=False, default=2100)  # 35 min
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_by = Column(UUID(as_uuid=False), ForeignKey('users.id'), nullable=False)
 
     __table_args__ = (
         CheckConstraint('distance_meters >= 10 AND distance_meters <= 100000', name='check_race_distance'),
+        CheckConstraint("status IN ('created', 'started')", name='check_race_status'),
         Index('idx_races_status', 'status'),
         Index('idx_races_scheduled_date', 'scheduled_date'),
     )
@@ -352,13 +381,18 @@ class Participant(Base):
     category = Column(String(50), nullable=True)
     registered_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     encryption_key_id = Column(UUID(as_uuid=False), ForeignKey('encryption_keys.id'), nullable=False)
+    start_time = Column(DateTime(timezone=True), nullable=True)  # When participant started
+    end_time = Column(DateTime(timezone=True), nullable=True)  # When participant finished
+    status = Column(String(20), default='registered', nullable=False)  # registered, grace, running, completed
 
     __table_args__ = (
         UniqueConstraint('race_id', 'rfid_tag', name='uq_participant_race_rfid'),
         CheckConstraint("age >= 5 AND age <= 120", name='check_participant_age'),
         CheckConstraint("gender IN ('M', 'F', 'O')", name='check_participant_gender'),
+        CheckConstraint("status IN ('registered', 'grace', 'running', 'completed')", name='check_participant_status'),
         Index('idx_participants_race_id', 'race_id'),
         Index('idx_participants_rfid_tag', 'rfid_tag'),
+        Index('idx_participants_status', 'status'),
         {'extend_existing': True}  # Allow redefinition without creating during migrations
     )
 

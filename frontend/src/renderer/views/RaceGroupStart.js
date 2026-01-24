@@ -13,18 +13,18 @@ export function renderRaceGroupStart() {
       <!-- Statistics Panel -->
       <div class="panel" style="margin-top: 24px;">
         <div class="panel-header">Race Statistics</div>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 16px;">
-          <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
-            <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase;">Total</div>
-            <div id="stat-total" style="color: #cbd5e1; font-size: 24px; font-weight: bold;">0</div>
-          </div>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; padding: 16px;">
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #a78bfa; font-size: 12px; text-transform: uppercase;">Registered</div>
-            <div id="stat-grace" style="color: #a78bfa; font-size: 24px; font-weight: bold;">0</div>
+            <div id="stat-registered" style="color: #a78bfa; font-size: 24px; font-weight: bold;">0</div>
+          </div>
+          <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
+            <div style="color: #60a5fa; font-size: 12px; text-transform: uppercase;">Grace</div>
+            <div id="stat-grace" style="color: #60a5fa; font-size: 24px; font-weight: bold;">0</div>
           </div>
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #fbbf24; font-size: 12px; text-transform: uppercase;">Running</div>
-            <div id="stat-locked" style="color: #fbbf24; font-size: 24px; font-weight: bold;">0</div>
+            <div id="stat-running" style="color: #fbbf24; font-size: 24px; font-weight: bold;">0</div>
           </div>
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #34d399; font-size: 12px; text-transform: uppercase;">Completed</div>

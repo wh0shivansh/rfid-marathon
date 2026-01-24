@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from shared import (
     db, Race, RaceEntry,
     get_current_timestamp,
-    RACE_STATE_STARTED,
-    RACER_STATE_RUNNING, RACER_STATE_FINISHED
+    RACE_STATUS_STARTED,
+    RACER_STATUS_RUNNING, RACER_STATUS_FINISHED
 )
 
 app = Flask(__name__)
@@ -67,9 +67,9 @@ def rfid_hit():
             }), 200
         
         # Validate racer state and start time
-        if entry['state'] != RACER_STATE_RUNNING:
+        if entry['status'] != RACER_STATUS_RUNNING:
             return jsonify({
-                "message": f"Invalid racer state: {entry['state']}",
+                "message": f"Invalid racer status: {entry['status']}",
                 "rfid": rfid,
                 "action": "skipped"
             }), 200
@@ -106,7 +106,7 @@ def rfid_hit():
             "start_time": entry['start_time'].isoformat(),
             "end_time": current_time.isoformat(),
             "duration": duration,
-            "state": RACER_STATE_FINISHED
+            "status": RACER_STATUS_FINISHED
         }), 200
         
     except Exception as e:
@@ -142,7 +142,7 @@ def get_finished_racers(race_id):
         entries = RaceEntry.get_all_entries(race_id)
         
         # Filter only finished racers
-        finished = [e for e in entries if e['state'] == RACER_STATE_FINISHED]
+        finished = [e for e in entries if e['status'] == RACER_STATUS_FINISHED]
         
         # Convert datetime objects to strings
         finished_data = []

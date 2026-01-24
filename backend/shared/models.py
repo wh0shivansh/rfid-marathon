@@ -77,7 +77,7 @@ class Race:
         """Update race state"""
         with db.get_cursor() as cursor:
             cursor.execute("""
-                UPDATE races SET state = %s WHERE race_id = %s
+                UPDATE races SET status = %s WHERE race_id = %s
             """, (state, race_id))
             return cursor.rowcount > 0
     

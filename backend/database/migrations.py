@@ -86,6 +86,64 @@ class MigrationManager:
             results["error"] = str(e)
             return results
     
+    def ensure_participant_status_column(self) -> Dict[str, Any]:
+        """
+        Ensure all per-race participant tables include `status` column.
+        Uses the `races.table_name` to locate per-race tables and adds column if missing.
+        IDEMPOTENT and safe across all environments.
+        
+        Status values: 'registered', 'grace', 'running', 'completed'
+        """
+        results: Dict[str, Any] = {"updated_tables": [], "skipped_tables": [], "errors": []}
+        try:
+            if self.engine is None:
+                return {"success": False, "error": "No engine"}
+            inspector = inspect(self.engine)
+            # Fetch all races to know participant table names
+            with self.engine.connect() as conn:
+                race_rows = conn.execute(text("SELECT id, table_name FROM races")).fetchall()
+                for row in race_rows:
+                    race_id = row.id if hasattr(row, "id") else row[0]
+                    table_name = row.table_name if hasattr(row, "table_name") else row[1]
+                    if not table_name:
+                        results["skipped_tables"].append({"race_id": str(race_id), "reason": "no table_name"})
+                        continue
+                    # Inspect columns
+                    cols = [col['name'] for col in inspector.get_columns(table_name)] if inspector else []
+                    if 'status' not in cols:
+                        alter_sql = f"""
+                            ALTER TABLE "{table_name}" 
+                            ADD COLUMN status VARCHAR(20) DEFAULT 'registered' NOT NULL,
+                            ADD CONSTRAINT check_{table_name}_status 
+                            CHECK (status IN ('registered', 'grace', 'running', 'completed'))
+                        """
+                        try:
+                            conn.execute(text(alter_sql))
+                            # Update existing rows based on their timing data
+                            update_sql = f"""
+                                UPDATE "{table_name}"
+                                SET status = CASE
+                                    WHEN end_time IS NOT NULL THEN 'completed'
+                                    WHEN start_time IS NOT NULL THEN 'running'
+                                    ELSE 'registered'
+                                END
+                                WHERE status = 'registered'
+                            """
+                            conn.execute(text(update_sql))
+                            results["updated_tables"].append(table_name)
+                        except Exception as e:
+                            results["errors"].append({"table": table_name, "error": str(e)})
+                    else:
+                        results["skipped_tables"].append(table_name)
+                conn.commit()
+            results["success"] = True
+            return results
+        except Exception as e:
+            logger.error(f"✗ Failed ensuring participant status column: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            return results
+    
     def table_exists(self, table_name: str) -> bool:
         """
         Check if a table exists in the database.
@@ -342,6 +400,29 @@ class MigrationManager:
                     logger.info("✓ Added table_name column to races table")
                 else:
                     logger.info("✓ table_name column already exists in races table")
+                
+                # Add status column if missing
+                if 'status' not in races_columns:
+                    logger.info("Adding 'status' column to races table...")
+                    session.execute(text("""
+                        ALTER TABLE races 
+                        ADD COLUMN status VARCHAR(20) DEFAULT 'created' NOT NULL;
+                    """))
+                    # Add check constraint for status values
+                    try:
+                        session.execute(text("""
+                            ALTER TABLE races 
+                            ADD CONSTRAINT check_race_status CHECK (status IN ('created', 'started'));
+                        """))
+                    except Exception as e:
+                        # Constraint might already exist, don't fail
+                        logger.warning(f"Could not add status constraint (may already exist): {e}")
+                    
+                    session.commit()
+                    results["added_columns"].append("races.status")
+                    logger.info("✓ Added status column to races table")
+                else:
+                    logger.info("✓ status column already exists in races table")
             
             session.close()
             
@@ -455,28 +536,32 @@ def run_migrations() -> Dict[str, Any]:
     
     try:
         # Step 1: Create tables
-        logger.info("\n[1/7] Creating database tables...")
+        logger.info("\n[1/8] Creating database tables...")
         results["tables"] = migration_manager.create_tables()
         
         # Step 2: Add missing columns
-        logger.info("\n[2/7] Adding missing columns...")
+        logger.info("\n[2/8] Adding missing columns...")
         results["columns"] = migration_manager.add_missing_columns()
         
         # Step 3: Update constraints
-        logger.info("\n[3/7] Updating database constraints...")
+        logger.info("\n[3/8] Updating database constraints...")
         results["constraints"] = migration_manager.update_race_distance_constraint()
         
         # Step 4: Create custom indexes
-        logger.info("\n[4/7] Creating custom indexes...")
+        logger.info("\n[4/8] Creating custom indexes...")
         migration_manager.create_indexes()
         results["indexes"] = {"success": True}
         
         # Step 5: Add start/end columns to per-race participant tables
-        logger.info("\n[5/7] Ensuring per-race participant tables have start/end times...")
+        logger.info("\n[5/8] Ensuring per-race participant tables have start/end times...")
         results["participant_time_columns"] = migration_manager.ensure_participant_time_columns()
         
-        # Step 6: Verify schema
-        logger.info("\n[6/7] Verifying database schema...")
+        # Step 6: Add status column to per-race participant tables
+        logger.info("\n[6/8] Ensuring per-race participant tables have status column...")
+        results["participant_status_column"] = migration_manager.ensure_participant_status_column()
+        
+        # Step 7: Verify schema
+        logger.info("\n[7/8] Verifying database schema...")
         results["verification"] = migration_manager.verify_schema()
         
         if not results["verification"]["success"]:
@@ -485,8 +570,8 @@ def run_migrations() -> Dict[str, Any]:
                 details=results["verification"]
             )
         
-        # Step 7: Seed default data
-        logger.info("\n[7/7] Seeding default data...")
+        # Step 8: Seed default data
+        logger.info("\n[8/8] Seeding default data...")
         migration_manager.seed_default_data()
         results["seeding"] = {"success": True}
         

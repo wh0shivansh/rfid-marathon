@@ -110,7 +110,7 @@ def test_pre_race_scans(rfids):
         else:
             print(f"✗ {rfid}: Failed")
     
-    print("\n⏸  Racers are in GRACE state (no start times yet)")
+    print("\n⏸  Racers are in GRACE status (no start times yet)")
 
 
 def test_start_race(race_id):
@@ -256,7 +256,7 @@ def test_statistics(race_id):
         stats = result['statistics']
         
         print(f"\n📊 {result['race_name']}")
-        print(f"   State: {result['race_state']}")
+        print(f"   Status: {result['race_status']}")
         print(f"\n   Total Registered: {stats['total_registered']}")
         print(f"   In Grace: {stats['grace']}")
         print(f"   Running: {stats['running']}")
