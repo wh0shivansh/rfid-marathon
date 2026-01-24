@@ -143,6 +143,44 @@ class MigrationManager:
             results["success"] = False
             results["error"] = str(e)
             return results
+
+    def ensure_participant_gender_not_null(self) -> Dict[str, Any]:
+        """
+        Ensure gender is NOT NULL in all per-race participant tables.
+        - Backfill NULL/invalid gender values to 'O'
+        - Set DEFAULT 'O' and NOT NULL on gender column
+        """
+        results: Dict[str, Any] = {"updated_tables": [], "skipped_tables": [], "errors": []}
+        try:
+            if self.engine is None:
+                return {"success": False, "error": "No engine"}
+            inspector = inspect(self.engine)
+            with self.engine.connect() as conn:
+                race_rows = conn.execute(text("SELECT id, table_name FROM races")).fetchall()
+                for row in race_rows:
+                    race_id = row.id if hasattr(row, "id") else row[0]
+                    table_name = row.table_name if hasattr(row, "table_name") else row[1]
+                    if not table_name:
+                        results["skipped_tables"].append({"race_id": str(race_id), "reason": "no table_name"})
+                        continue
+                    cols = [col['name'] for col in inspector.get_columns(table_name)] if inspector else []
+                    if 'gender' not in cols:
+                        results["skipped_tables"].append({"table": table_name, "reason": "no gender column"})
+                        continue
+                    try:
+                        conn.execute(text(f"UPDATE \"{table_name}\" SET gender = 'O' WHERE gender IS NULL OR gender NOT IN ('M','F','O')"))
+                        conn.execute(text(f"ALTER TABLE \"{table_name}\" ALTER COLUMN gender SET DEFAULT 'O', ALTER COLUMN gender SET NOT NULL"))
+                        results["updated_tables"].append(table_name)
+                    except Exception as e:
+                        results["errors"].append({"table": table_name, "error": str(e)})
+                conn.commit()
+            results["success"] = True
+            return results
+        except Exception as e:
+            logger.error(f"✗ Failed enforcing gender NOT NULL: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            return results
     
     def table_exists(self, table_name: str) -> bool:
         """
@@ -536,32 +574,36 @@ def run_migrations() -> Dict[str, Any]:
     
     try:
         # Step 1: Create tables
-        logger.info("\n[1/8] Creating database tables...")
+        logger.info("\n[1/9] Creating database tables...")
         results["tables"] = migration_manager.create_tables()
         
         # Step 2: Add missing columns
-        logger.info("\n[2/8] Adding missing columns...")
+        logger.info("\n[2/9] Adding missing columns...")
         results["columns"] = migration_manager.add_missing_columns()
         
         # Step 3: Update constraints
-        logger.info("\n[3/8] Updating database constraints...")
+        logger.info("\n[3/9] Updating database constraints...")
         results["constraints"] = migration_manager.update_race_distance_constraint()
         
         # Step 4: Create custom indexes
-        logger.info("\n[4/8] Creating custom indexes...")
+        logger.info("\n[4/9] Creating custom indexes...")
         migration_manager.create_indexes()
         results["indexes"] = {"success": True}
         
         # Step 5: Add start/end columns to per-race participant tables
-        logger.info("\n[5/8] Ensuring per-race participant tables have start/end times...")
+        logger.info("\n[5/9] Ensuring per-race participant tables have start/end times...")
         results["participant_time_columns"] = migration_manager.ensure_participant_time_columns()
         
         # Step 6: Add status column to per-race participant tables
-        logger.info("\n[6/8] Ensuring per-race participant tables have status column...")
+        logger.info("\n[6/9] Ensuring per-race participant tables have status column...")
         results["participant_status_column"] = migration_manager.ensure_participant_status_column()
         
-        # Step 7: Verify schema
-        logger.info("\n[7/8] Verifying database schema...")
+        # Step 7: Enforce gender NOT NULL in participant tables
+        logger.info("\n[7/9] Enforcing gender NOT NULL in participant tables...")
+        results["participant_gender_not_null"] = migration_manager.ensure_participant_gender_not_null()
+        
+        # Step 8: Verify schema
+        logger.info("\n[8/9] Verifying database schema...")
         results["verification"] = migration_manager.verify_schema()
         
         if not results["verification"]["success"]:
@@ -570,8 +612,8 @@ def run_migrations() -> Dict[str, Any]:
                 details=results["verification"]
             )
         
-        # Step 8: Seed default data
-        logger.info("\n[8/8] Seeding default data...")
+        # Step 9: Seed default data
+        logger.info("\n[9/9] Seeding default data...")
         migration_manager.seed_default_data()
         results["seeding"] = {"success": True}
         

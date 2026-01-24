@@ -90,6 +90,12 @@ class RFIDService:
         # Normalize RFID tag to uppercase
         rfid_tag = rfid_tag.upper()
         
+        # Validate gender (must be provided)
+        if not gender:
+            raise ValidationError("Gender is required and must be one of M, F, O")
+        if gender not in ["M", "F", "O"]:
+            raise ValidationError("Gender is invalid; must be M, F, or O")
+
         # Auto-calculate category from age if not provided
         if not category and age is not None:
             category = self._calculate_category(age)

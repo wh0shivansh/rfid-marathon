@@ -151,7 +151,7 @@ class ParticipantRegisterRequest(BaseModel):
     rfid_tag: str = Field(..., min_length=RFID_TAG_MIN_LENGTH, max_length=RFID_TAG_MAX_LENGTH)
     name: str = Field(..., min_length=PARTICIPANT_NAME_MIN_LENGTH, max_length=PARTICIPANT_NAME_MAX_LENGTH)
     age: Optional[int] = Field(None, ge=5, le=120)
-    gender: Optional[str] = Field(None, pattern="^(M|F|O)$")
+    gender: str = Field(..., pattern="^(M|F|O)$")
     category: Optional[str] = Field(None, max_length=50)
 
     @validator('rfid_tag')
@@ -377,7 +377,7 @@ class Participant(Base):
     rfid_tag = Column(String(32), nullable=False, index=True)  # PLAINTEXT (requirement)
     encrypted_name = Column(Text, nullable=False)  # Fernet encrypted
     age = Column(Integer, nullable=True)
-    gender = Column(String(1), nullable=True)
+    gender = Column(String(1), nullable=False)
     category = Column(String(50), nullable=True)
     registered_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     encryption_key_id = Column(UUID(as_uuid=False), ForeignKey('encryption_keys.id'), nullable=False)

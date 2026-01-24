@@ -75,9 +75,9 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
             <label>Full Name<input id="name" name="name" required style="background:#1e293b; color:#e2e8f0; border:1px solid #334155;" /></label>
             <label>Age<input id="age" name="age" type="number" min="5" max="120" required style="background:#1e293b; color:#e2e8f0; border:1px solid #334155;" /></label>
             <label>Gender
-              <select id="gender" name="gender" style="background:#1e293b; color:#e2e8f0; border:1px solid #334155;">
-                <option value="">--</option>
-                <option value="M">Male</option>
+              <select id="gender" name="gender" required style="background:#1e293b; color:#e2e8f0; border:1px solid #334155;">
+                <option value="" disabled>-- Select gender --</option>
+                <option value="M" selected>Male</option>
                 <option value="F">Female</option>
                 <option value="O">Other</option>
               </select>

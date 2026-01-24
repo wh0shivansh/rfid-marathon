@@ -803,6 +803,11 @@ async function submitRegistration() {
     return;
   }
 
+  if (!gender) {
+    showToast('Gender is required', 'error');
+    return;
+  }
+
   try {
     await ensureAuth();
     const response = await fetch(`${state.config.apiBaseUrl}/participant/register`, {
@@ -816,7 +821,7 @@ async function submitRegistration() {
         rfid_tag: rfid.toUpperCase(),
         name: name,
         age: age ? Number(age) : undefined,
-        gender: gender || undefined
+          gender: gender.toUpperCase()
       })
     });
 
@@ -933,10 +938,6 @@ function formatRaceStartCandidateRow(candidate, type) {
     const seconds = Math.floor(durationSeconds % 60);
     
     duration = `${minutes}:${String(seconds).padStart(2, '0')}`;
-    
-    if (minutes > 1) {
-      durationMin = ` (${minutes}m)`;
-    }
   }
   
   const startTimeStr = candidate.start_time 
@@ -955,11 +956,11 @@ function formatRaceStartCandidateRow(candidate, type) {
   
   if (type === 'completed'){
     return `
-      <div style="display: grid; grid-template-columns: 180px 100px 100px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+      <div style="display: grid; grid-template-columns: 180px 100px 100px 60px; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
         <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
         <div>${startTimeStr}</div>
         <div>${endTimeStr}</div>
-        <div>${duration}${durationMin}</div>
+        <div>${duration}</div>
       </div>
     `;
   } else if (type === 'grace period'){
@@ -973,7 +974,7 @@ function formatRaceStartCandidateRow(candidate, type) {
       <div style="display: grid; grid-template-columns: 180px 100px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
         <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
         <div>${startTimeStr}</div>
-        <div>${duration}${durationMin}</div>
+        <div>${duration}</div>
       </div>
     `;
   }

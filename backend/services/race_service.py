@@ -173,7 +173,7 @@ class RaceService:
                     rfid_tag VARCHAR(32) NOT NULL,
                     encrypted_name TEXT NOT NULL,
                     age INTEGER,
-                    gender VARCHAR(1),
+                    gender VARCHAR(1) NOT NULL,
                     category VARCHAR(50),
                     registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
                     encryption_key_id UUID NOT NULL REFERENCES encryption_keys(id),

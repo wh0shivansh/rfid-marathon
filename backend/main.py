@@ -788,10 +788,10 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
             current_time = get_current_timestamp_utc()
             logger.debug(f"[RFID_START] No proxy timestamp provided; using backend time: {current_time}")
         
-        # Get today's date
-        today = datetime.utcnow().date()
+        # Get today's date in Asia/Kolkata to align with local race scheduling
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
         today_str = today.isoformat()
-        logger.info(f"[RFID_START] Looking for races scheduled for today: {today_str}")
+        logger.info(f"[RFID_START] Looking for races scheduled for today (Asia/Kolkata): {today_str}")
         
         # Find today's race
         query = text("""
@@ -1008,10 +1008,10 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
             current_time = get_current_timestamp_utc()
             logger.debug(f"[RFID_END] No proxy timestamp provided; using backend time: {current_time}")
         
-        # Get today's date for filtering
-        today = datetime.utcnow().date()
+        # Get today's date in Asia/Kolkata to align with local race scheduling
+        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
         today_str = today.isoformat()
-        logger.info(f"[RFID_END] Today's date: {today_str}")
+        logger.info(f"[RFID_END] Today's date (Asia/Kolkata): {today_str}")
         
         # Find today's race with status='started'
         query = text("""
