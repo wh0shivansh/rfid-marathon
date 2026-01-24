@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from models import Race, Participant, TimingRecord, RaceStatus
+from models import Race, Participant, RaceStatus
 from basefunctions import (
     NotFoundError,
     ConflictError,
@@ -367,17 +367,31 @@ class RaceService:
         """
         race = self.get_race(db, race_id)
         
-        total_participants = db.query(Participant).filter_by(race_id=race_id).count()
+        # Get participant table name
+        table_name_value = getattr(race, "table_name", None)
+        table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
         
-        started_count = db.query(TimingRecord).filter_by(
-            race_id=race_id,
-            timing_point='start'
-        ).count()
-        
-        finished_count = db.query(TimingRecord).filter_by(
-            race_id=race_id,
-            timing_point='end'
-        ).count()
+        try:
+            # Count total participants in per-race table
+            total_participants = db.execute(
+                text(f"SELECT COUNT(*) FROM \"{table_name}\"")
+            ).scalar() or 0
+            
+            # Count participants who have started (have start_time)
+            started_count = db.execute(
+                text(f"SELECT COUNT(*) FROM \"{table_name}\" WHERE start_time IS NOT NULL")
+            ).scalar() or 0
+            
+            # Count participants who have finished (have end_time)
+            finished_count = db.execute(
+                text(f"SELECT COUNT(*) FROM \"{table_name}\" WHERE end_time IS NOT NULL")
+            ).scalar() or 0
+            
+        except Exception as e:
+            logger.debug(f"Could not query statistics for race {race_id} table {table_name}: {e}")
+            total_participants = 0
+            started_count = 0
+            finished_count = 0
         
         return {
             "race_id": race_id,

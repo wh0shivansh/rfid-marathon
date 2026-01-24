@@ -25,7 +25,7 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
               <select id="race-select-dropdown" style="width: 100%; padding: 12px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 1em; cursor: pointer;">
                 <option value="">-- Select a race --</option>
                 ${availableRaces.map(race => `
-                  <option value="${race.id}" ${selectedRace === race.id ? 'selected' : ''}>${race.name} - ${race.location} (${new Date(race.scheduled_date).toLocaleDateString()})</option>
+                  <option value="${race.id}" ${selectedRace === race.id ? 'selected' : ''}>${race.name} - ${race.distance_meters}m - ${race.location} (${new Date(race.scheduled_date).toLocaleDateString()})</option>
                 `).join('')}
               </select>
               <button id="continue-step1" style="margin-top: 16px; width: 100%; padding: 12px 16px; background: #3b82f6; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 1em; font-weight: 600;">Continue to RFID Scan →</button>

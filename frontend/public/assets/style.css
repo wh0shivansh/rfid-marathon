@@ -229,3 +229,39 @@ th {
   border-color: #00d4ff;
   box-shadow: 0 0 5px rgba(0, 212, 255, 0.2);
 }
+/* Status Message Styles */
+.status-success {
+  background-color: #d1fae5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.status-error {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.status-warning {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.status-info {
+  background-color: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}

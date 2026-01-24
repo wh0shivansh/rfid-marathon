@@ -14,7 +14,7 @@ from typing import List, Dict, Any
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from models import Base, User, Race, Participant, TimingRecord, AuditLog, NonceCache, EncryptionKey
+from models import Base, User, Race, Participant, AuditLog, NonceCache, EncryptionKey
 from database.connection import get_database_manager
 from basefunctions import DatabaseError, log_security_event, get_current_timestamp_utc
 from constants import AuditAction
@@ -40,6 +40,51 @@ class MigrationManager:
         """
         inspector = inspect(self.engine)
         return inspector.get_table_names() if inspector else []
+    
+    def ensure_participant_time_columns(self) -> Dict[str, Any]:
+        """
+        Ensure all per-race participant tables include `start_time` and `end_time`.
+        Uses the `races.table_name` to locate per-race tables and adds columns if missing.
+        IDEMPOTENT and safe across all environments.
+        """
+        results: Dict[str, Any] = {"updated_tables": [], "skipped_tables": [], "errors": []}
+        try:
+            if self.engine is None:
+                return {"success": False, "error": "No engine"}
+            inspector = inspect(self.engine)
+            # Fetch all races to know participant table names
+            with self.engine.connect() as conn:
+                race_rows = conn.execute(text("SELECT id, table_name FROM races")).fetchall()
+                for row in race_rows:
+                    race_id = row.id if hasattr(row, "id") else row[0]
+                    table_name = row.table_name if hasattr(row, "table_name") else row[1]
+                    if not table_name:
+                        results["skipped_tables"].append({"race_id": str(race_id), "reason": "no table_name"})
+                        continue
+                    # Inspect columns
+                    cols = [col['name'] for col in inspector.get_columns(table_name)] if inspector else []
+                    alterations = []
+                    if 'start_time' not in cols:
+                        alterations.append("ADD COLUMN start_time TIMESTAMPTZ NULL")
+                    if 'end_time' not in cols:
+                        alterations.append("ADD COLUMN end_time TIMESTAMPTZ NULL")
+                    if alterations:
+                        alter_sql = f"ALTER TABLE \"{table_name}\" " + ", ".join(alterations) + ";"
+                        try:
+                            conn.execute(text(alter_sql))
+                            results["updated_tables"].append(table_name)
+                        except Exception as e:
+                            results["errors"].append({"table": table_name, "error": str(e)})
+                    else:
+                        results["skipped_tables"].append(table_name)
+                conn.commit()
+            results["success"] = True
+            return results
+        except Exception as e:
+            logger.error(f"✗ Failed ensuring participant time columns: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            return results
     
     def table_exists(self, table_name: str) -> bool:
         """
@@ -157,7 +202,6 @@ class MigrationManager:
         required_tables = [
             "users",
             "races",
-            "timing_records",
             "audit_log",
             "nonce_cache",
             "encryption_keys"
@@ -299,22 +343,6 @@ class MigrationManager:
                 else:
                     logger.info("✓ table_name column already exists in races table")
             
-            # Check if timing_records table exists and add participant_table_name column if missing
-            if self.table_exists("timing_records"):
-                timing_columns = [col['name'] for col in inspector.get_columns('timing_records')] if inspector else []
-                
-                if 'participant_table_name' not in timing_columns:
-                    logger.info("Adding 'participant_table_name' column to timing_records table...")
-                    session.execute(text("""
-                        ALTER TABLE timing_records 
-                        ADD COLUMN participant_table_name VARCHAR(128);
-                    """))
-                    session.commit()
-                    results["added_columns"].append("timing_records.participant_table_name")
-                    logger.info("✓ Added participant_table_name column to timing_records table")
-                else:
-                    logger.info("✓ participant_table_name column already exists in timing_records table")
-            
             session.close()
             
             return {
@@ -427,24 +455,28 @@ def run_migrations() -> Dict[str, Any]:
     
     try:
         # Step 1: Create tables
-        logger.info("\n[1/6] Creating database tables...")
+        logger.info("\n[1/7] Creating database tables...")
         results["tables"] = migration_manager.create_tables()
         
         # Step 2: Add missing columns
-        logger.info("\n[2/6] Adding missing columns...")
+        logger.info("\n[2/7] Adding missing columns...")
         results["columns"] = migration_manager.add_missing_columns()
         
         # Step 3: Update constraints
-        logger.info("\n[3/6] Updating database constraints...")
+        logger.info("\n[3/7] Updating database constraints...")
         results["constraints"] = migration_manager.update_race_distance_constraint()
         
         # Step 4: Create custom indexes
-        logger.info("\n[4/6] Creating custom indexes...")
+        logger.info("\n[4/7] Creating custom indexes...")
         migration_manager.create_indexes()
         results["indexes"] = {"success": True}
         
-        # Step 5: Verify schema
-        logger.info("\n[5/6] Verifying database schema...")
+        # Step 5: Add start/end columns to per-race participant tables
+        logger.info("\n[5/7] Ensuring per-race participant tables have start/end times...")
+        results["participant_time_columns"] = migration_manager.ensure_participant_time_columns()
+        
+        # Step 6: Verify schema
+        logger.info("\n[6/7] Verifying database schema...")
         results["verification"] = migration_manager.verify_schema()
         
         if not results["verification"]["success"]:
@@ -453,8 +485,8 @@ def run_migrations() -> Dict[str, Any]:
                 details=results["verification"]
             )
         
-        # Step 6: Seed default data
-        logger.info("\n[6/6] Seeding default data...")
+        # Step 7: Seed default data
+        logger.info("\n[7/7] Seeding default data...")
         migration_manager.seed_default_data()
         results["seeding"] = {"success": True}
         

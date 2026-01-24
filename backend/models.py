@@ -196,14 +196,20 @@ class ParticipantResponse(BaseModel):
 # Timing Schemas
 # ---------------------------------------------------------------------------
 
-class TimingRecordRequest(BaseModel):
-    """Record timing (start/end) request schema"""
-    race_id: str
-    rfid_tag: str = Field(..., min_length=RFID_TAG_MIN_LENGTH, max_length=RFID_TAG_MAX_LENGTH)
-    timing_point: TimingPoint
-    timestamp: str = Field(..., description="ISO 8601 timestamp of timing event")
-    device_id: str = Field(..., min_length=1, max_length=100)
+# NOTE: Deprecated schemas removed (January 23, 2026)
+# - TimingRecordRequest/Response: Timing now written directly to per-race participant tables
+# - SyncHandshakeRequest/Response: Listener no longer maintains state files; sync no longer needed
 
+
+# ---------------------------------------------------------------------------
+# RFID Hub Schemas
+# ---------------------------------------------------------------------------
+
+class RFIDHitRequest(BaseModel):
+    """RFID hit request from Start/End Hub"""
+    rfid_tag: str = Field(..., min_length=RFID_TAG_MIN_LENGTH, max_length=RFID_TAG_MAX_LENGTH)
+    encrypted_key: str = Field(..., min_length=1, description="Encrypted hub secret")
+    
     @validator('rfid_tag')
     def validate_rfid_format(cls, v):
         if not validate_rfid_tag(v):
@@ -211,31 +217,27 @@ class TimingRecordRequest(BaseModel):
         return v.upper()
 
 
-class TimingRecordResponse(BaseModel):
-    """Timing record response schema"""
-    id: str
+class RFIDHitResponse(BaseModel):
+    """Response to RFID hit"""
+    success: bool
+    message: str
+    rfid_tag: Optional[str] = None
+
+
+class RaceGroupStartRequest(BaseModel):
+    """Request to start a race group (assign start times)"""
+    race_id: str = Field(..., description="Race identifier")
+    group_number: int = Field(..., ge=1, description="Group number to start")
+
+
+class RaceGroupStartResponse(BaseModel):
+    """Response when group is started"""
+    success: bool
+    message: str
     race_id: str
-    participant_id: str
-    rfid_tag: str
-    timing_point: TimingPoint
-    recorded_at: str
-    device_id: str
-    synced: bool
-
-    class Config:
-        from_attributes = True
-
-
-class SyncHandshakeRequest(BaseModel):
-    """Sync handshake request to confirm successful storage"""
-    timing_record_ids: List[str] = Field(..., min_length=1, max_length=100)
-
-
-class SyncHandshakeResponse(BaseModel):
-    """Sync handshake response"""
-    confirmed_ids: List[str]
-    failed_ids: List[str]
-    timestamp: str
+    group_number: int
+    rfids_started: int = 0
+    start_time_assigned: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -358,35 +360,6 @@ class Participant(Base):
         Index('idx_participants_race_id', 'race_id'),
         Index('idx_participants_rfid_tag', 'rfid_tag'),
         {'extend_existing': True}  # Allow redefinition without creating during migrations
-    )
-
-
-# ---------------------------------------------------------------------------
-# Timing Records Model (IMMUTABLE)
-# ---------------------------------------------------------------------------
-
-class TimingRecord(Base):
-    """Timing records table - IMMUTABLE after creation"""
-    __tablename__ = "timing_records"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=generate_uuid)
-    race_id = Column(UUID(as_uuid=False), ForeignKey('races.id', ondelete='CASCADE'), nullable=False, index=True)
-    participant_id = Column(UUID(as_uuid=False), nullable=False, index=True)  # No FK - participant table is dynamic
-    participant_table_name = Column(String(128), nullable=False)  # Track which table participant is in
-    rfid_tag = Column(String(32), nullable=False, index=True)
-    timing_point = Column(String(10), nullable=False)  # 'start' or 'end'
-    recorded_at = Column(DateTime(timezone=True), nullable=False)  # Actual timing event timestamp
-    device_id = Column(String(100), nullable=False)
-    synced = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # DB insertion time
-
-    __table_args__ = (
-        UniqueConstraint('race_id', 'participant_id', 'timing_point', name='uq_timing_race_participant_point'),
-        CheckConstraint("timing_point IN ('start', 'end')", name='check_timing_point'),
-        Index('idx_timing_race_id', 'race_id'),
-        Index('idx_timing_participant_id', 'participant_id'),
-        Index('idx_timing_rfid_tag', 'rfid_tag'),
-        Index('idx_timing_synced', 'synced'),
     )
 
 

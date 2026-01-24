@@ -9,6 +9,9 @@ No magic values allowed - everything must be defined here.
 
 from enum import Enum
 from typing import Final
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # ============================================================================
 # SECURITY CONSTANTS
@@ -37,6 +40,11 @@ RSA_KEY_SIZE: Final[int] = 4096  # Bits for RSA key generation
 FERNET_KEY_ROTATION_DAYS: Final[int] = 90  # Rotate encryption keys every 90 days
 ENCRYPTION_ALGORITHM: Final[str] = "Fernet"  # Symmetric encryption for DB
 
+# RFID Hub Authentication
+RFID_HUB_KEY_ENCRYPTION_ALGORITHM: Final[str] = "Fernet"  # Encrypt hub secrets with Fernet
+RFID_START_HUB_PORT: Final[int] = 9090  # Dedicated listener port
+RFID_END_HUB_PORT: Final[int] = 9090   # Same listener port, validates different keys
+
 # ============================================================================
 # DATABASE CONSTANTS
 # ============================================================================
@@ -62,7 +70,6 @@ DB_CONNECTION_TIMEOUT_SECONDS: Final[int] = 10
 TABLE_USERS: Final[str] = "users"
 TABLE_RACES: Final[str] = "races"
 TABLE_RFID_MAPPING: Final[str] = "rfid_mapping"
-TABLE_TIMING_RECORDS: Final[str] = "timing_records"
 TABLE_AUDIT_LOG: Final[str] = "audit_log"
 TABLE_NONCE_CACHE: Final[str] = "nonce_cache"
 TABLE_ENCRYPTION_KEYS: Final[str] = "encryption_keys"
@@ -91,6 +98,39 @@ HTTP_NOT_FOUND: Final[int] = 404
 HTTP_CONFLICT: Final[int] = 409
 HTTP_TOO_MANY_REQUESTS: Final[int] = 429
 HTTP_INTERNAL_ERROR: Final[int] = 500
+
+# ============================================================================
+# RFID LISTENER CONSTANTS
+# ============================================================================
+
+# RFID Listener Service (Port 9090)
+RFID_LISTENER_PORT: Final[int] = 9090
+RFID_LISTENER_HOST: Final[str] = "0.0.0.0"
+
+# Grace period for late arrivals (seconds) - candidates can still be added during this window
+RFID_GRACE_PERIOD_SECONDS: Final[int] = int(os.getenv("RFID_GRACE_PERIOD_SECONDS", 120)) # Default 2 minutes
+
+# Minimum read count to be considered a valid candidate
+RFID_MIN_READ_COUNT_TO_LOCK: Final[int] = int(os.getenv("RFID_MIN_READ_COUNT_TO_LOCK", 3))
+
+# No-hit timeout to lock remaining unlocked candidates (seconds)
+RFID_NO_HIT_TIMEOUT_SECONDS: Final[int] = int(os.getenv("RFID_NO_HIT_TIMEOUT_SECONDS", 20))
+
+# Reader name mapping (configure which readers are start/end)
+# By default: readers with "start" or "Reader 1" in name are start readers
+#             readers with "end" or "Reader 2" in name are end readers
+RFID_START_READER_NAMES: Final[list] = ["Reader 1", "start", "Start"] + os.getenv("RFID_START_READER_NAMES", "").split(",")
+RFID_END_READER_NAMES: Final[list] = ["Reader 2", "end", "End"] + os.getenv("RFID_END_READER_NAMES", "").split(",")
+
+# ============================================================================
+# RACE STATE CONSTANTS (BACKEND ONLY)
+# ============================================================================
+
+# Race state persistence - BACKEND ONLY, NOT used by listener (9090)
+# The listener is now stateless and forwards all RFID hits directly to backend
+# Backend manages all race state (groups, grace periods, locking) via this file
+RACE_STATE_FILE: Final[str] = "race_state.json"  # Relative to backend root
+RACE_STATE_DEDUPLICATION: Final[bool] = True  # Prevent duplicate RFIDs in same group
 
 # ============================================================================
 # TIMING CONSTANTS
@@ -246,17 +286,21 @@ class EnvVars:
     """Environment variable names - used for configuration loading"""
     
     # Database
-    SUPABASE_DB_HOST = "SUPABASE_DB_HOST"
-    SUPABASE_DB_PORT = "SUPABASE_DB_PORT"
-    SUPABASE_DB_NAME = "SUPABASE_DB_NAME"
-    SUPABASE_DB_USER = "SUPABASE_DB_USER"
-    SUPABASE_DB_PASSWORD = "SUPABASE_DB_PASSWORD"
+    DB_HOST = "DB_HOST"
+    DB_PORT = "DB_PORT"
+    DB_NAME = "DB_NAME"
+    DB_USER = "DB_USER"
+    DB_PASSWORD = "DB_PASSWORD"
     
     # Security
     JWT_SECRET_KEY = "JWT_SECRET_KEY"
     FERNET_MASTER_KEY = "FERNET_MASTER_KEY"
     RSA_PRIVATE_KEY_PATH = "RSA_PRIVATE_KEY_PATH"
     RSA_PUBLIC_KEY_PATH = "RSA_PUBLIC_KEY_PATH"
+    
+    # RFID Hub Secrets (plaintext)
+    RFID_START_HUB_SECRET = "RFID_START_HUB_SECRET"
+    RFID_END_HUB_SECRET = "RFID_END_HUB_SECRET"
     
     # Server
     SERVER_HOST = "SERVER_HOST"

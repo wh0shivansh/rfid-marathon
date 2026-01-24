@@ -1,438 +1,450 @@
-# Secure RFID Marathon Management System
+# 🏃 RFID Marathon System
 
-**Security Level:** Military-grade, audit-ready  
-**Stack:** FastAPI (Python) + PostgreSQL (Supabase) + Electron + React + Vite  
-**Encryption:** Fernet (at rest), RSA-4096 (API responses), HTTPS in transit  
-**Authentication:** JWT + timestamp/nonce replay protection  
-**Offline-first:** SQLite cache with handshake-based sync  
-**Status:** Backend Complete ✅ | Frontend In Progress 🚧
+Complete backend redesign for RFID-based race tracking with start-time correction, separate laptop roles, and proxy-based RFID ingestion.
 
 ---
 
-## Architecture
+## 🎯 Quick Links
 
-- **Backend**: FastAPI, stateless, Dockerized, connects to Supabase PostgreSQL with enforced SSL (sslmode=require).
-- **Frontend**: Electron + React + Vite desktop app with offline SQLite, RSA decryption, and sync retry.
-- **Data Flow**: RFID scans → local cache → signed API requests → backend validation → encrypted storage.
-
-```
-frontend (Electron + React)
-  │  (HTTPS + JWT + RSA)
-  ▼
-backend (FastAPI)
-  │  (SSL enforced)
-  ▼
-Supabase PostgreSQL (encrypted names via Fernet)
-```
-
-Key flows:
-- **Registration**: RFID scan → name encrypted (Fernet) → stored; RSA-encrypted name returned to UI.
-- **Timing**: Start/end timestamps immutable; duplicates rejected; replay-protected.
-- **Sync**: Offline records queued in SQLite → handshake API confirms persistence → local delete.
+| Document | Purpose |
+|----------|---------|
+| **[QUICKSTART.md](QUICKSTART.md)** | ⚡ Get up and running fast |
+| **[BACKEND_README.md](BACKEND_README.md)** | 📚 Complete API documentation |
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | 🏗️ System architecture & diagrams |
+| **[RACE_FLOW_SEQUENCES.md](RACE_FLOW_SEQUENCES.md)** | 📊 Race day flow diagrams |
+| **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** | ✅ Pre-deployment checklist |
+| **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** | 📋 Implementation overview |
 
 ---
 
-## Implementation Status
+## 🚀 Quick Start (5 Minutes)
 
-### ✅ Backend (Complete)
-
-**Core Services:**
-- ✅ Race Management (CRUD operations, status validation)
-- ✅ Participant Service (registration, lookup, encrypted names)
-- ✅ RFID Mapping (unique constraints per race)
-- ✅ Timing Service (immutable records, duplicate detection)
-- ✅ Encryption (Fernet for DB, RSA for API responses)
-- ✅ Authentication (JWT with replay protection, bcrypt password hashing)
-
-**Infrastructure:**
-- ✅ Database migrations with idempotent schema creation
-- ✅ SSL-enforced PostgreSQL connection pooling
-- ✅ Middleware (auth validation, rate limiting, audit logging)
-- ✅ Docker containerization with multi-stage builds
-- ✅ Health checks and monitoring endpoints
-
-**Security:**
-- ✅ Timestamp + nonce replay attack prevention (60-second window)
-- ✅ Rate limiting (60 requests/minute per IP)
-- ✅ Immutable audit log with IP tracking
-- ✅ Input validation via Pydantic schemas
-- ✅ SQL injection protection (SQLAlchemy ORM)
-
-### 🚧 Frontend (In Progress)
-
-**Completed:**
-- ✅ Vite + React + Electron setup
-- ✅ SQLite schema for offline cache
-- ✅ Service layer architecture (API, Database, Encryption, Sync)
-- ✅ Environment configuration structure
-
-**Pending:**
-- ⏳ UI components implementation
-- ⏳ RFID scanning integration
-- ⏳ Login and race selection workflows
-- ⏳ Registration loop (continuous scanning)
-- ⏳ Timing device interfaces (Device 1 & 2)
-- ⏳ Results dashboard with decryption
-- ⏳ Sync queue management with retry logic
-
----
-
-## Security Model
-
-### Transport Layer
-- **HTTPS**: All API communication encrypted
-- **SSL/TLS**: Database connections require SSL (sslmode=require)
-- **CORS**: Configured for Electron app origin only
-
-### Authentication & Authorization
-- **JWT**: HS256 algorithm, 15-minute access tokens
-- **Password Hashing**: Bcrypt with 12 rounds
-- **Replay Protection**: Headers `X-Timestamp` (ISO 8601) + `X-Nonce` (64-char hex)
-- **Nonce Tracking**: Database-backed cache with 60-second window, automatic cleanup
-
-### Data Protection
-| Data Type | At Rest | In Transit | Decryption |
-|-----------|---------|------------|------------|
-| Participant Names | Fernet (symmetric) | RSA-4096 (asymmetric) | Frontend private key |
-| RFID Tags | Plaintext* | HTTPS | N/A |
-| Passwords | Bcrypt (one-way) | HTTPS | Never decrypted |
-| JWT Tokens | N/A | HTTPS | Backend validation only |
-
-*RFID tags stored as plaintext per requirement (needed for quick lookups)
-
-### Immutability Guarantees
-- **Timing Records**: Database unique constraint `(race_id, participant_id, timing_point)` prevents updates
-- **Audit Log**: Insert-only table with no UPDATE/DELETE permissions
-- **Key Rotation**: Tracked in `encryption_keys` table with version history
-
----
-
-## Deployment (Docker)
-
-### Quick Start
-
+### 1. Install Dependencies
 ```bash
-cd backend
-
-# 1. Copy and configure environment
-cp .env.template .env
-nano .env  # Add Supabase credentials
-
-# 2. Generate encryption keys
-python - <<'PY'
-from cryptography.fernet import Fernet
-import secrets
-print('JWT_SECRET_KEY=' + secrets.token_hex(32))
-print('FERNET_MASTER_KEY=' + Fernet.generate_key().decode())
-PY
-
-# 3. Build and run
-docker-compose up --build
-
-# 4. Health check
-curl http://localhost:8000/health
-# Expected: {"status": "healthy", "database": "connected", "encryption": "ready"}
+cd backend/shared
+pip install -r requirements.txt
 ```
 
-### Environment Variables (Required)
-
+### 2. Setup Database
 ```bash
-# Database (Supabase)
-SUPABASE_DB_HOST=aws-0-us-west-1.pooler.supabase.com
-SUPABASE_DB_PORT=5432
-SUPABASE_DB_NAME=postgres
-SUPABASE_DB_USER=postgres.xxxxx
-SUPABASE_DB_PASSWORD=your_secure_password
+# Create PostgreSQL database
+createdb rfid_marathon
 
-# Security Keys
-JWT_SECRET_KEY=<64-char-hex>
-FERNET_MASTER_KEY=<44-char-base64>
-
-# Server (optional, defaults provided)
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8000
-SERVER_ENV=production
+# Initialize schema
+init-database.bat
 ```
 
-Backend auto-runs migrations on startup. Check logs:
+### 3. Start Services
 ```bash
-docker-compose logs backend | grep "Migration"
+# Windows: Start all services at once
+start-all-services.bat
+
+# Or start individually:
+run-start-line.bat      # Port 8000
+run-end-line.bat        # Port 8002
+run-registration.bat    # Port 8003
+run-start-proxy.bat     # Port 9090
+run-end-proxy.bat       # Port 9090
+```
+
+### 4. Test the System
+```bash
+python test_system.py
 ```
 
 ---
 
-## Project Structure
+## 📋 System Overview
+
+### Architecture
+
+```
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│  START LINE      │  │  END LINE        │  │  REGISTRATION    │
+│  LAPTOP          │  │  LAPTOP          │  │  LAPTOP          │
+├──────────────────┤  ├──────────────────┤  ├──────────────────┤
+│ Frontend (Start) │  │ (No Frontend)    │  │ Frontend (Full)  │
+│ Backend (8000)   │  │ Backend (8002)   │  │ Backend (8003)   │
+│ Proxy (9090)     │  │ Proxy (9090)     │  │ (No Proxy)       │
+│ RFID Hub         │  │ RFID Hub         │  │                  │
+└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
+         │                     │                      │
+         └─────────────────────┴──────────────────────┘
+                               │
+                       ┌───────▼────────┐
+                       │   PostgreSQL   │
+                       └────────────────┘
+```
+
+### Key Features
+
+✅ **Start-time correction** (10-second rule)  
+✅ **Separate laptop roles** (start, end, registration)  
+✅ **Proxy-based RFID ingestion** (hardware abstraction)  
+✅ **Dynamic per-race tables** (scalability)  
+✅ **Real-time race tracking**  
+✅ **Automatic rankings**
+
+---
+
+## 🗂️ Project Structure
 
 ```
 rfid-marathon/
-├── backend/                  # ✅ FastAPI Backend (Complete)
-│   ├── constants.py          # Global enums and constants
-│   ├── basefunctions.py      # Shared utilities (validators, formatters)
-│   ├── models.py             # Pydantic schemas + SQLAlchemy models
-│   ├── main.py               # FastAPI app with middleware stack
-│   │
-│   ├── database/
-│   │   ├── connection.py     # SSL-enforced connection pool
-│   │   └── migrations.py     # Idempotent schema creation
-│   │
-│   ├── services/
-│   │   ├── race/             # Race CRUD and status management
-│   │   ├── participant/      # Registration and lookup
-│   │   ├── rfid/             # RFID-to-participant mapping
-│   │   ├── timing/           # Immutable timing records
-│   │   ├── encryption/       # Fernet + RSA managers
-│   │   ├── auth/             # JWT + password hashing
-│   │   └── sync/             # Offline handshake confirmation
-│   │
-│   ├── middleware/
-│   │   ├── auth_middleware.py   # JWT validation + replay protection
-│   │   ├── rate_limiter.py      # IP-based rate limiting
-│   │   └── audit_logger.py      # Immutable audit trail
-│   │
-│   ├── Dockerfile            # Multi-stage production build
-│   ├── docker-compose.yml    # Orchestration with health checks
-│   └── requirements.txt      # Python dependencies
-│
-├── frontend/                 # 🚧 Electron + React (In Progress)
-│   ├── src/
-│   │   ├── main.js           # Electron main process
-│   │   ├── renderer.js       # React app entry
-│   │   ├── services/         # API, Database, Encryption, Sync
-│   │   └── components/       # React UI (to be implemented)
-│   │
-│   ├── database/
-│   │   └── schema.sql        # SQLite offline cache schema
-│   │
-│   └── package.json          # Node dependencies
-│
-├── README.md                 # This file
-├── sprint.md                 # Sprint plan with progress tracking
-└── notes.txt                 # Developer notes
+├── backend/
+│   ├── shared/              # Shared models & utilities
+│   │   ├── models.py        # Race & RaceEntry models
+│   │   ├── database.py      # DB connection
+│   │   ├── constants.py     # System constants
+│   │   └── utils.py         # Helper functions
+│   ├── start-line/          # Start line backend (Port 8000)
+│   ├── end-line/            # End line backend (Port 8002)
+│   └── registration/        # Registration backend (Port 8003)
+├── proxy-9090/
+│   ├── start-line/          # Start proxy (Port 9090)
+│   └── end-line/            # End proxy (Port 9090)
+├── frontend/                # Electron app
+├── docker-compose.yml       # Docker orchestration
+└── test_system.py           # Integration tests
 ```
 
 ---
 
-## API Endpoints (Backend)
+## 🎯 Laptop Roles
 
-### Health & Crypto
-- `GET /health` - System health check
-- `GET /api/v1/crypto/public-key` - Get RSA public key for encryption
+### START LINE LAPTOP
+- **Purpose**: Initialize races, handle start line RFID hits
+- **Services**: Backend (8000), Proxy (9090), Frontend
+- **RFID Hub**: ✓ Connected
+- **Logic**: Start-time correction (10-second rule)
 
-### Authentication
-- `POST /api/v1/auth/login` - Login with username/password, returns JWT
+### END LINE LAPTOP
+- **Purpose**: Record finish times only
+- **Services**: Backend (8002), Proxy (9090)
+- **RFID Hub**: ✓ Connected
+- **Logic**: Validate runner state before recording
 
-### Race Management
-- `POST /api/v1/race` - Create race
-- `GET /api/v1/race/{race_id}` - Get race details
-- `GET /api/v1/race` - List all races
-- `PATCH /api/v1/race/{race_id}` - Update race (status, etc.)
-
-### Participant Operations
-- `POST /api/v1/participant/register` - Register participant (returns RSA-encrypted name)
-- `POST /api/v1/participant/lookup` - Lookup by RFID tag
-
-### Timing Operations
-- `POST /api/v1/timing/start` - Record start time (Device 1)
-- `POST /api/v1/timing/end` - Record end time (Device 2)
-- `GET /api/v1/timing/race/{race_id}` - Get all timing records for race
-
-### Offline Sync
-- `POST /api/v1/sync/handshake` - Confirm synced records (returns confirmed/failed IDs)
+### REGISTRATION LAPTOP
+- **Purpose**: Race creation, registration, reporting
+- **Services**: Backend (8003), Frontend
+- **RFID Hub**: ✗ Not needed
+- **Logic**: Full CRUD operations, results generation
 
 ---
 
-## Data Flow (Detailed)
+## 🔌 API Endpoints
 
-### 1. Authentication Flow
+### START LINE (8000)
+- `POST /rfid/hit` - Process RFID scan at start
+- `POST /race/start` - Start the race
+- `GET /race/today` - Get today's race
+
+### END LINE (8002)
+- `POST /rfid/hit` - Process RFID scan at finish
+- `GET /race/active` - Get active race
+- `GET /race/{id}/finished` - Get finished racers
+
+### REGISTRATION (8003)
+- `POST /races` - Create race
+- `POST /races/{id}/register` - Register racer
+- `GET /races/{id}/results` - Get results with rankings
+- `GET /races/{id}/stats` - Get statistics
+
+### PROXIES (9090, 9090)
+- `POST /rfid/scan` - Receive RFID from hardware
+- `GET /health` - Health check
+
+---
+
+## 🏁 Race Day Workflow
+
+### 1. Pre-Race Setup (T-60 minutes)
 ```
-Frontend → POST /auth/login
-  Headers: X-Timestamp, X-Nonce
-  Body: {username, password, timestamp, nonce}
+Registration Laptop:
+  ✓ Create race for today
+  ✓ Register racers (RFID + name + bib)
 
-Backend validates:
-  ✓ Timestamp within ±60 seconds
-  ✓ Nonce not in cache (replay check)
-  ✓ Password hash matches (bcrypt)
+Start Line Laptop:
+  ✓ Start services
+  ✓ Connect RFID hub
 
-Backend returns:
-  {access_token, expires_in, user_id}
-
-All subsequent requests:
-  Authorization: Bearer <token>
+End Line Laptop:
+  ✓ Start services
+  ✓ Connect RFID hub
 ```
 
-### 2. Registration Flow
+### 2. Check-In (T-5 minutes)
 ```
-Frontend (Offline Mode):
-  1. Scan RFID → prompt for name
-  2. Insert into local SQLite (participants table)
-  3. Add to sync_queue with action="register"
-
-Frontend (Online Mode):
-  1. POST /participant/register {race_id, rfid_tag, name, ...}
-  2. Backend: Encrypt name with Fernet → store in DB
-  3. Backend: Encrypt name with RSA → return to client
-  4. Frontend: Decrypt with private key → display confirmation
-
-Sync Process:
-  1. Queue processor checks connectivity
-  2. POST queued registrations to backend
-  3. Receive encrypted names
-  4. POST /sync/handshake with record IDs
-  5. Delete confirmed records from local queue
+Racers scan at START LINE
+→ Recorded in GRACE state
+→ No start times yet
 ```
 
-### 3. Timing Flow (Immutable)
+### 3. Race Start (T=0)
 ```
-Device 1 (Start):
-  1. Scan RFID at start line
-  2. Record timestamp + device_id
-  3. POST /timing/start {race_id, rfid_tag, timestamp, device_id}
-  4. Backend: Unique constraint enforced (race_id, participant_id, "start")
-  5. Frontend: Display "Started" status
+Click "START RACE" button
+→ Race state: idle → started
+→ All GRACE entries → RUNNING
+→ Start times assigned
+```
 
-Device 2 (End):
-  1. Scan RFID at finish line
-  2. Record timestamp + device_id
-  3. POST /timing/end {race_id, rfid_tag, timestamp, device_id}
-  4. Backend: Calculate duration if start exists
-  5. Frontend: Display "Finished" + duration
+### 4. During Race
+```
+START LINE:
+  ✓ Late arrivals get individual start times
+  ✓ 10-second rule prevents duplicates
+
+END LINE:
+  ✓ Records finish times for valid runners
+  ✓ Skips invalid entries
+```
+
+### 5. Post-Race
+```
+Registration Laptop:
+  ✓ View results with rankings
+  ✓ Export data
+  ✓ Generate reports
 ```
 
 ---
 
-## Security Features (Implemented)
+## 🧪 Testing
 
-✅ **SSL/TLS Enforcement** - Database connection requires SSL  
-✅ **Password Hashing** - Bcrypt 12 rounds  
-✅ **JWT Authentication** - HS256, 15-minute expiration  
-✅ **Replay Protection** - Timestamp (±60s) + nonce validation  
-✅ **Rate Limiting** - 60 requests/minute per IP  
-✅ **Audit Logging** - Immutable log with IP, user, timestamp  
-✅ **Encryption at Rest** - Fernet for participant names  
-✅ **Encryption in Transit** - HTTPS + RSA for API responses  
-✅ **Timing Immutability** - Database constraints prevent updates  
-✅ **Input Validation** - Pydantic schemas on all endpoints  
-✅ **SQL Injection Protection** - SQLAlchemy ORM with parameterized queries  
-
----
-
-## Testing
-
-### Backend
+### Run Integration Tests
 ```bash
-cd backend
-
-# Unit tests
-pytest -v
-
-# Security scan
-bandit -r . -ll
-
-# Dependency vulnerability check
-safety check
-
-# Coverage report
-pytest --cov=. --cov-report=html
+python test_system.py
 ```
 
-### Frontend (To Be Implemented)
+Tests:
+- ✅ Health checks (all services)
+- ✅ Race creation
+- ✅ Racer registration
+- ✅ Pre-race scans
+- ✅ Race start
+- ✅ Late arrivals
+- ✅ Start-time correction
+- ✅ Finish line scans
+- ✅ Results & rankings
+
+### Manual Testing
 ```bash
-cd frontend
+# Create race
+curl -X POST http://localhost:8003/races \
+  -H "Content-Type: application/json" \
+  -d "{\"race_name\": \"Test\", \"race_date\": \"2026-01-24\"}"
 
-# Unit tests
-npm test
+# Start race
+curl -X POST http://localhost:8000/race/start \
+  -H "Content-Type: application/json" \
+  -d "{\"race_id\": 1}"
 
-# E2E tests
-npm run test:e2e
+# Simulate RFID scan
+curl -X POST http://localhost:9090/rfid/scan \
+  -H "Content-Type: application/json" \
+  -d "{\"rfid\": \"ABC123\"}"
 ```
 
 ---
 
-## Known Limitations & Future Work
+## 🐳 Docker Deployment
 
-### Current Limitations
-1. **Frontend UI**: Core components not yet implemented
-2. **RFID Hardware Integration**: Requires physical device testing
-3. **Key Rotation**: Manual process (HSM integration planned)
-4. **Backup Strategy**: Manual PostgreSQL dumps (automated backups planned)
-
-### Planned Enhancements
-- [ ] Hardware security module (HSM) for key storage
-- [ ] Automated database backups to S3
-- [ ] Real-time WebSocket updates for timing dashboard
-- [ ] Mobile app for race officials
-- [ ] Biometric authentication option
-- [ ] Multi-language support
-
----
-
-## Troubleshooting
-
-### Backend Won't Start
+### Start All Services
 ```bash
-# Check Supabase connection
-docker-compose logs backend | grep "Database"
-
-# Verify SSL
-psql "postgresql://user:pass@host:port/dbname?sslmode=require"
-
-# Check migrations
-docker-compose exec backend python -c "from database.migrations import run_migrations; run_migrations()"
+docker-compose up -d
 ```
 
-### JWT Authentication Fails
+### Check Status
 ```bash
-# Verify secret is set
-docker-compose exec backend env | grep JWT_SECRET_KEY
-
-# Check token expiration
-curl -H "Authorization: Bearer <token>" http://localhost:8000/api/v1/race
+docker-compose ps
 ```
 
-### Rate Limiting Triggered
+### View Logs
 ```bash
-# Clear rate limit cache (Redis if implemented, or restart)
-docker-compose restart backend
+docker-compose logs -f
+```
+
+### Stop Services
+```bash
+docker-compose down
 ```
 
 ---
 
-## Default Credentials
+## 📊 Database Schema
 
-**⚠️ CHANGE IMMEDIATELY IN PRODUCTION**
-
+### Races Table
+```sql
+CREATE TABLE races (
+    race_id SERIAL PRIMARY KEY,
+    race_name VARCHAR(255),
+    race_date DATE,
+    state VARCHAR(20),  -- 'idle' | 'started'
+    created_at TIMESTAMP
+);
 ```
-Username: admin
-Password: AdminPassword123!
-```
 
-Create in database:
-```python
-from services.auth.password_manager import PasswordManager
-pm = PasswordManager()
-hashed = pm.hash_password("AdminPassword123!")
-# Insert into users table with username='admin'
+### Per-Race Entries (Dynamic)
+```sql
+CREATE TABLE race_{race_id}_entries (
+    entry_id SERIAL PRIMARY KEY,
+    rfid VARCHAR(50) UNIQUE,
+    racer_name VARCHAR(255),
+    bib_number VARCHAR(50),
+    state VARCHAR(20),  -- 'grace' | 'running' | 'finished'
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
+    created_at TIMESTAMP
+);
 ```
 
 ---
 
-## Contributing
+## 🔧 Configuration
 
-1. Follow sprint plan in `sprint.md`
-2. All PRs require security review
-3. Test coverage must be >80%
-4. No secrets in code (use .env)
-5. Document all API changes in README
+### Environment Variables
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=rfid_marathon
+DB_USER=postgres
+DB_PASSWORD=postgres
+```
+
+### Port Allocation
+| Service | Port |
+|---------|------|
+| START LINE Backend | 8000 |
+| END LINE Backend | 8002 |
+| REGISTRATION Backend | 8003 |
+| START LINE Proxy | 9090 |
+| END LINE Proxy | 9090 |
+| PostgreSQL | 5432 |
 
 ---
 
-## License
+## 🛠️ Troubleshooting
 
-Proprietary - Innogative © 2026
+### Services Won't Start
+```bash
+# Check Python version
+python --version  # Should be 3.11+
+
+# Check dependencies
+pip list
+
+# Check port availability
+netstat -ano | findstr :8000
+```
+
+### Database Connection Failed
+```bash
+# Check PostgreSQL is running
+sc query postgresql
+
+# Verify database exists
+psql -U postgres -l
+```
+
+### RFID Scans Not Working
+1. Check proxy is running
+2. Verify backend URL in proxy
+3. Check RFID hub configuration
+4. Review proxy logs
 
 ---
 
-**Last Updated**: January 22, 2026  
-**Version**: 1.0.0 (Backend Complete)  
-**Security Audit**: Pending (Sprint 8)
+## 📚 Documentation
+
+### Essential Reading
+1. **[QUICKSTART.md](QUICKSTART.md)** - Start here!
+2. **[BACKEND_README.md](BACKEND_README.md)** - API reference
+3. **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design
+
+### Advanced Topics
+4. **[RACE_FLOW_SEQUENCES.md](RACE_FLOW_SEQUENCES.md)** - Detailed flows
+5. **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Production ready
+6. **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Technical details
+
+---
+
+## 🎓 Key Concepts
+
+### Start-Time Correction (10-Second Rule)
+When a racer scans their RFID after the race starts:
+- **< 10 seconds**: Scan ignored (prevents duplicates)
+- **> 10 seconds**: Start time updated (late arrival correction)
+
+### Race States
+- **idle**: Race created but not started
+- **started**: Race in progress
+
+### Racer States
+- **grace**: Pre-race, no start time
+- **running**: Has start time, racing
+- **finished**: Has end time, completed
+
+---
+
+## 🚦 System Status
+
+✅ **Ready for Deployment**
+
+- [x] Complete backend redesign
+- [x] All services implemented
+- [x] Database schema created
+- [x] API endpoints tested
+- [x] Integration tests passing
+- [x] Documentation complete
+- [x] Docker configuration ready
+
+---
+
+## 📞 Support
+
+### Getting Help
+1. Check documentation in this repository
+2. Review error logs in service terminals
+3. Run integration tests to verify setup
+4. Check troubleshooting sections
+
+### Reporting Issues
+Include:
+- Service name (start-line, end-line, registration)
+- Error message from logs
+- Steps to reproduce
+- System configuration
+
+---
+
+## 📜 License
+
+MIT License
+
+---
+
+## 🙏 Acknowledgments
+
+Built with:
+- Flask (Python web framework)
+- PostgreSQL (Database)
+- psycopg2 (PostgreSQL driver)
+- Docker (Containerization)
+
+---
+
+**Version**: 1.0.0  
+**Last Updated**: January 24, 2026  
+**Status**: Production Ready ✅
+
+---
+
+## 🎉 Next Steps
+
+1. ✅ **Read [QUICKSTART.md](QUICKSTART.md)** to get started
+2. ✅ **Run `init-database.bat`** to setup database
+3. ✅ **Run `start-all-services.bat`** to start services
+4. ✅ **Run `python test_system.py`** to verify installation
+5. ✅ **Review [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** for production
+
+**Ready to track your first race! 🏁**

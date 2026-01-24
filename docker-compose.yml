@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: rfid_postgres
+    environment:
+      POSTGRES_DB: rfid_marathon
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - rfid_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # START LINE Backend
+  start-line-backend:
+    build:
+      context: ./backend
+      dockerfile: start-line/Dockerfile
+    container_name: start_line_backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: rfid_marathon
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rfid_network
+    restart: unless-stopped
+
+  # END LINE Backend
+  end-line-backend:
+    build:
+      context: ./backend
+      dockerfile: end-line/Dockerfile
+    container_name: end_line_backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: rfid_marathon
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      PORT: 8002
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rfid_network
+    restart: unless-stopped
+
+  # REGISTRATION Backend
+  registration-backend:
+    build:
+      context: ./backend
+      dockerfile: registration/Dockerfile
+    container_name: registration_backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: rfid_marathon
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      PORT: 8003
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rfid_network
+    restart: unless-stopped
+
+  # START LINE Proxy
+  start-line-proxy:
+    build:
+      context: ./proxy-9090
+      dockerfile: start-line/Dockerfile
+    container_name: start_line_proxy
+    environment:
+      BACKEND_URL: http://start-line-backend:8000
+      PORT: 9090
+    ports:
+      - "9090:9090"
+    depends_on:
+      - start-line-backend
+    networks:
+      - rfid_network
+    restart: unless-stopped
+
+  # END LINE Proxy
+  end-line-proxy:
+    build:
+      context: ./proxy-9090
+      dockerfile: end-line/Dockerfile
+    container_name: end_line_proxy
+    environment:
+      BACKEND_URL: http://end-line-backend:8002
+      PORT: 9090
+    ports:
+      - "9090:9090"
+    depends_on:
+      - end-line-backend
+    networks:
+      - rfid_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  rfid_network:
+    driver: bridge

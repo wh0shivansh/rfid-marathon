@@ -5,6 +5,7 @@ import { renderRegistration } from './views/CandidateRegistration.js';
 import { renderDashboard } from './views/Dashboard.js';
 import { renderCreateRace } from './views/CreateRace.js';
 import { renderResults } from './views/Results.js';
+import { renderRaceGroupStart } from './views/RaceGroupStart.js';
 
 const secureApi = window.secureApi;
 const app = document.getElementById("app");
@@ -34,6 +35,13 @@ const state = {
   participants: [],
   selectedRaceFilter: null, // For filtering participants by race
 };
+
+// Race Start View state
+let raceStartSelectedRaceId = null;
+// Group selection removed; default to group 1 when starting
+let raceStartSelectedGroupNumber = 1;
+let raceStartTime = null;
+let raceStartPollingInterval = null;
 
 // Expose state to CandidateRegistration component
 window.appState = state;
@@ -88,6 +96,15 @@ async function login() {
 async function ensureAuth() {
   if (isTokenValid()) return;
   await login();
+}
+
+function showStartGroupStatus(message, type = 'info') {
+  const statusElement = document.getElementById('status-message');
+  if (statusElement) {
+    statusElement.innerHTML = message;
+    statusElement.className = `status-${type}`;
+    statusElement.style.display = 'block';
+  }
 }
 
 async function fetchRaces() {
@@ -210,6 +227,7 @@ function renderSidebar() {
       <nav class="sidebar-nav">
           <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
           <button class="nav-btn ${state.view === "create" ? "active" : ""}" data-view="create">Create Race</button>
+          <button class="nav-btn ${state.view === "race-start" ? "active" : ""}" data-view="race-start">Start Group</button>
           <button class="nav-btn ${state.view === "register" ? "active" : ""}" data-view="register">Register</button>
           <button class="nav-btn ${state.view === "results" ? "active" : ""}" data-view="results">Data View</button>
       </nav>
@@ -244,6 +262,11 @@ function renderRegister() {
 }
 
 function render() {
+  // Cleanup polling when leaving race-start view
+  if (state.view !== "race-start" && raceStartPollingInterval) {
+    stopRaceDataPolling();
+  }
+  
   const htmlContent = `
     <div class="layout">
       ${renderSidebar()}
@@ -251,6 +274,7 @@ function render() {
         ${renderHeader()}
         ${state.view === "dashboard" ? renderDashboard(state.races, state.dashboardData.todayRegistrations, state.dashboardData.totalParticipants, state.dashboardData.startedToday, state.dashboardData.finishedToday, state.dashboardData.raceStats) : ""}
         ${state.view === "create" ? renderCreateRace() : ""}
+        ${state.view === "race-start" ? renderRaceGroupStart() : ""}
         ${state.view === "register" ? renderRegister() : ""}
         ${state.view === "results" ? renderResults(state.races, state.participants, state.selectedRaceFilter) : ""}
       </div>
@@ -554,6 +578,21 @@ function render() {
     });
   }
 
+  // Race Group Start view: Polling-powered live RFID handler
+  if (state.view === "race-start") {
+    loadRaceStartRaces();
+    startRaceDataPolling(); // Start polling for live updates
+    
+    const raceSelect = document.getElementById('race-select');
+    if (raceSelect) raceSelect.addEventListener('change', handleRaceStartRaceChange);
+    
+    const startForm = document.getElementById('start-group-form');
+    if (startForm) startForm.addEventListener('submit', handleRaceStartSubmit);
+    
+    const refreshBtn = document.getElementById('refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshRaceStartData);
+  }
+
   // Registration wizard event listeners
   if (state.view === "register") {
     // Step 1: Continue button
@@ -802,5 +841,280 @@ async function submitRegistration() {
     showToast(`Registration failed: ${err.message}`, 'error');
   }
 }
+
+// ===== Race Start View Helper Functions =====
+
+function startRaceDataPolling() {
+  // Initial fetch
+  refreshRaceStartData();
+  
+  // Poll every 2 seconds for live updates
+  if (raceStartPollingInterval) {
+    clearInterval(raceStartPollingInterval);
+  }
+  
+  raceStartPollingInterval = setInterval(() => {
+    refreshRaceStartData();
+  }, 2000);
+  
+  console.log('✓ Started polling race data from backend');
+  updateRaceStartWSStatus(true, 'Polling Active');
+}
+
+function stopRaceDataPolling() {
+  if (raceStartPollingInterval) {
+    clearInterval(raceStartPollingInterval);
+    raceStartPollingInterval = null;
+    console.log('⏹ Stopped polling race data');
+    updateRaceStartWSStatus(false, 'Polling Stopped');
+  }
+}
+
+function updateRaceStartCandidateDisplay(grouped) {
+  const container = document.getElementById('groups-container');
+  if (!container) return;
+
+  const { registered = [], started = [], completed = [] } = grouped;
+
+  if (registered.length === 0 && started.length === 0 && completed.length === 0) {
+    container.innerHTML = '<div style="background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 12px; color: #cbd5e1; font-size: 12px;"><p style="color: #64748b; margin: 0;">No participants yet. Register participants first.</p></div>';
+    return;
+  }
+
+  const renderParticipantList = (title, color, participants, emptyText) => {
+    const rows = participants && participants.length
+      ? participants.map((p) => formatRaceStartCandidateRow(p, title.toLowerCase())).join('')
+      : `<p style="color: #64748b; margin: 0;">${emptyText}</p>`;
+
+    return `
+      <div style="background: #0b1222; border: 1px solid #1f2937; border-radius: 4px; padding: 8px; min-height: 60px;">
+        <div style="color: ${color}; font-size: 12px; font-weight: 600; margin-bottom: 6px;">${title} (${participants.length})</div>
+        ${rows}
+      </div>
+    `;
+  };
+
+  // Render three sections: Registered, Started (Running), Completed
+  const html = `
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+      ${renderParticipantList('Registered', '#a78bfa', registered, 'No registered participants')}
+      ${renderParticipantList('Running', '#fbbf24', started, 'No runners started yet')}
+      ${renderParticipantList('Completed', '#34d399', completed, 'No finished runners yet')}
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+function renderRaceStartCandidateList(title, color, candidates, emptyText) {
+  const rows = candidates && candidates.length
+    ? candidates.map((c) => formatRaceStartCandidateRow(c, title.toLowerCase())).join('')
+    : `<p style="color: #64748b; margin: 0;">${emptyText}</p>`;
+
+  return `
+    <div style="background: #0b1222; border: 1px solid #1f2937; border-radius: 4px; padding: 8px; min-height: 60px;">
+      <div style="color: ${color}; font-size: 12px; font-weight: 600; margin-bottom: 6px;">${title}</div>
+      ${rows}
+    </div>
+  `;
+}
+
+function formatRaceStartCandidateRow(candidate, type) {
+  let duration = '';
+  let durationMin = '';
+  
+  if (candidate.state === 'completed' && candidate.start_time && candidate.end_time) {
+    const startTime = new Date(candidate.start_time);
+    const endTime = new Date(candidate.end_time);
+    const durationMs = endTime - startTime;
+    const durationSeconds = durationMs / 1000;
+    const minutes = Math.floor(durationSeconds / 60);
+    const seconds = Math.floor(durationSeconds % 60);
+    
+    duration = `${minutes}:${String(seconds).padStart(2, '0')}`;
+    
+    if (minutes > 1) {
+      durationMin = ` (${minutes}m)`;
+    }
+  }
+  
+  const startTimeStr = candidate.start_time 
+    ? new Date(candidate.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : 'pending';
+  
+  const endTimeStr = candidate.end_time
+    ? new Date(candidate.end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '-';
+  
+  let color = '#cbd5e1';
+  if (type === 'running') color = '#fbbf24';
+  else if (type === 'grace') color = '#a78bfa';
+  else if (type === 'completed') color = '#34d399';
+  
+  if (type === 'completed'){
+    return `
+      <div style="display: grid; grid-template-columns: 180px 80px 80px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+        <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
+        <div>${startTimeStr}</div>
+        <div>${endTimeStr}</div>
+        <div>${duration}${durationMin}</div>
+      </div>
+    `;
+  } else {
+    return `
+      <div style="display: grid; grid-template-columns: 180px 80px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+        <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
+        <div>${startTimeStr}</div>
+        <div>${duration}${durationMin}</div>
+      </div>
+    `;
+  }
+}
+
+function updateRaceStartStatistics(participants) {
+  let total = participants.length;
+  let registered = 0;
+  let started = 0;
+  let completed = 0;
+  
+  for (const p of participants) {
+    if (p.state === 'registered') registered++;
+    else if (p.state === 'started') started++;
+    else if (p.state === 'completed') completed++;
+  }
+  
+  const totalEl = document.getElementById('stat-total');
+  if (totalEl) totalEl.textContent = total;
+  
+  const registeredEl = document.getElementById('stat-grace');
+  if (registeredEl) registeredEl.textContent = registered;
+  
+  const startedEl = document.getElementById('stat-locked');
+  if (startedEl) startedEl.textContent = started;
+  
+  const completedEl = document.getElementById('stat-completed');
+  if (completedEl) completedEl.textContent = completed;
+}
+
+function updateRaceStartWSStatus(connected, status) {
+  const statusEl = document.getElementById('ws-status');
+  if (!statusEl) return;
+  
+  if (connected) {
+    statusEl.innerHTML = '🟢 ' + status;
+    statusEl.style.color = '#34d399';
+  } else {
+    statusEl.innerHTML = '🔴 ' + status;
+    statusEl.style.color = '#ef4444';
+  }
+}
+
+async function loadRaceStartRaces() {
+  try {
+    // Reuse authenticated API helper so file:// protocol does not break relative URLs
+    await ensureAuth();
+    const races = await apiRequest('/race');
+
+    const raceSelect = document.getElementById('race-select');
+    if (!raceSelect) return;
+
+    raceSelect.innerHTML = '<option value="">Select a race...</option>';
+
+    if (Array.isArray(races) && races.length > 0) {
+      races.forEach((race) => {
+        const option = document.createElement('option');
+        option.value = race.id;
+        option.textContent = race.name;
+        raceSelect.appendChild(option);
+      });
+    }
+  } catch (e) {
+    console.error('Failed to load races:', e);
+    showRaceStartStatusMessage('Failed to load races', 'error');
+  }
+}
+
+function handleRaceStartRaceChange(event) {
+  raceStartSelectedRaceId = event.target.value;
+  const groupInfoEl = document.getElementById('group-info');
+  if (groupInfoEl) groupInfoEl.textContent = 'Group 1 (default)';
+}
+
+async function handleRaceStartSubmit(event) {
+  event.preventDefault();
+  
+  if (!raceStartSelectedRaceId) {
+    showRaceStartStatusMessage('Please select a race', 'error');
+    return;
+  }
+  
+  try {
+    const response = await fetch('http://localhost:9090/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        race_name: raceStartSelectedRaceId,
+        group_number: raceStartSelectedGroupNumber,
+        grace_period_seconds: 120
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      raceStartTime = new Date();
+      showToast(`✓ Started ${raceStartSelectedRaceId} - ${data.locked_candidates} running candidates`, 'success');
+      const startBtn = document.getElementById('start-group-btn');
+      if (startBtn) startBtn.disabled = true;
+    } else {
+      showRaceStartStatusMessage(`Failed to start group: ${data.error}`, 'error');
+    }
+  } catch (e) {
+    console.error('Failed to start group:', e);
+    showRaceStartStatusMessage('Failed to connect to RFID server', 'error');
+  }
+}
+
+async function refreshRaceStartData() {
+  if (!raceStartSelectedRaceId) {
+    console.warn('No race selected for race start view');
+    return;
+  }
+  
+  try {
+    // Ensure authentication token is valid
+    await ensureAuth();
+    
+    // Fetch participants with timing data from backend using authenticated API request
+    const participants = await apiRequest(`/race/${raceStartSelectedRaceId}/participants?include_timing=true`);
+    
+    // Group participants by state for display
+    const grouped = {
+      registered: participants.filter(p => p.state === 'registered'),
+      started: participants.filter(p => p.state === 'started'),
+      completed: participants.filter(p => p.state === 'completed')
+    };
+    updateRaceStartCandidateDisplay(grouped);
+    updateRaceStartStatistics(participants);
+  } catch (e) {
+    console.error('Failed to refresh race data from backend:', e);
+    updateRaceStartWSStatus(false, 'Connection Error');
+  }
+}
+
+function showRaceStartStatusMessage(message, type = 'info') {
+  const statusEl = document.getElementById('status-message');
+  if (!statusEl) return;
+  
+  const colors = {
+    'success': '#10b981',
+    'error': '#ef4444',
+    'info': '#0ea5e9'
+  };
+  
+  statusEl.innerHTML = `<div style="padding: 12px; background: ${colors[type]}20; border: 1px solid ${colors[type]}; border-radius: 4px; color: ${colors[type]};">${message}</div>`;
+}
+
+// ===== End Race Start View Helper Functions =====
 
 bootstrap();

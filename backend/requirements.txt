@@ -1,5 +1,11 @@
 fastapi==0.110.0
 uvicorn[standard]==0.27.0
+flask==3.0.0
+flask_sock==0.7.0
+flask-cors==4.0.0
+simple_websocket==1.1.0
+gunicorn==21.2.0
+fnctl==0.1.2
 sqlalchemy==2.0.25
 psycopg2-binary==2.9.9
 cryptography==42.0.5
@@ -8,3 +14,4 @@ bcrypt==4.1.2
 python-dotenv==1.0.1
 pydantic==2.5.3
 python-multipart==0.0.6
+requests==2.31.0

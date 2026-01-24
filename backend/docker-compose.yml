@@ -1,6 +1,29 @@
 version: "3.9"
 
 services:
+  rfid-listener:
+    build: .
+    container_name: rfid-listener-9090
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "9090:9090"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      RFID_LISTENER_PORT: 9090
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./keys:/app/keys
+      - ./race_state.json:/app/race_state.json
+    command: python rfid_listener.py
+    depends_on:
+      - backend
+
   backend:
     build: .
     container_name: rfid-backend
@@ -13,15 +36,13 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8000
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
     volumes:
       - ./keys:/app/keys
-    command: >
-      sh -c "python -c 'from database.migrations import run_migrations; run_migrations()' && \
-             uvicorn main:app --host 0.0.0.0 --port ${SERVER_PORT:-8000}"
+      - ./race_state.json:/app/race_state.json
 
 networks:
   default:

@@ -70,11 +70,11 @@ class DatabaseManager:
         FAIL-FAST approach: if configuration is invalid, crash immediately.
         """
         required_vars = [
-            EnvVars.SUPABASE_DB_HOST,
-            EnvVars.SUPABASE_DB_PORT,
-            EnvVars.SUPABASE_DB_NAME,
-            EnvVars.SUPABASE_DB_USER,
-            EnvVars.SUPABASE_DB_PASSWORD,
+            EnvVars.DB_HOST,
+            EnvVars.DB_PORT,
+            EnvVars.DB_NAME,
+            EnvVars.DB_USER,
+            EnvVars.DB_PASSWORD,
         ]
         
         try:
@@ -91,11 +91,11 @@ class DatabaseManager:
         Returns:
             str: PostgreSQL connection URL
         """
-        host = get_env_variable(EnvVars.SUPABASE_DB_HOST)
-        port = get_env_variable(EnvVars.SUPABASE_DB_PORT)
-        dbname = get_env_variable(EnvVars.SUPABASE_DB_NAME)
-        user = get_env_variable(EnvVars.SUPABASE_DB_USER)
-        password = get_env_variable(EnvVars.SUPABASE_DB_PASSWORD)
+        host = get_env_variable(EnvVars.DB_HOST)
+        port = get_env_variable(EnvVars.DB_PORT)
+        dbname = get_env_variable(EnvVars.DB_NAME)
+        user = get_env_variable(EnvVars.DB_USER)
+        password = get_env_variable(EnvVars.DB_PASSWORD)
         
         # Build connection string with SSL enforcement
         connection_string = (
