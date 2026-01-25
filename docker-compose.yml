@@ -9,7 +9,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     env_file:
-      - .env
+      - backend/.env
     networks:
       - rfid-net
 
@@ -23,7 +23,7 @@ services:
     depends_on:
       - backend
     env_file:
-      - .env
+      - proxy/.env
     networks:
       - rfid-net
 
