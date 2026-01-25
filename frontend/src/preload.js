@@ -13,18 +13,6 @@ function getEnv(name, fallback = "") {
   return process.env[name] || fallback;
 }
 
-function loadPrivateKeyPem() {
-  const keyPath = getEnv("FRONTEND_RSA_PRIVATE_KEY_PATH", "");
-  if (!keyPath) return null;
-  const resolved = path.isAbsolute(keyPath)
-    ? keyPath
-    : path.join(__dirname, "../", keyPath);
-  if (fs.existsSync(resolved)) {
-    return fs.readFileSync(resolved, "utf-8");
-  }
-  return null;
-}
-
 // Create a wrapper object with the necessary fernet functions
 const fernetWrapper = {
   decrypt: (key, token) => {
@@ -61,7 +49,6 @@ contextBridge.exposeInMainWorld("secureApi", {
     password: getEnv("FRONTEND_PASSWORD", getEnv("PASSWORD", "")),
     deviceId: getEnv("FRONTEND_DEVICE_ID", "registration-station"),
   }),
-  getPrivateKeyPem: loadPrivateKeyPem,
   Fernet: fernetWrapper,
 });
 

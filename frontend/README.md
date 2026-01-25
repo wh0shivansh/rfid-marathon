@@ -67,7 +67,6 @@ Secure, offline-first Electron desktop app for RFID-based marathon management.
    - `VITE_API_BASE_URL`: Backend URL (e.g., `http://localhost:8000/api/v1`). **NOT listener 9090.**
    - `FRONTEND_USERNAME` / `FRONTEND_PASSWORD`: Login credentials (hashed server-side on backend).
    - `FRONTEND_RSA_PRIVATE_KEY_PATH`: Local private key for decrypting participant names.
-   - `SQLITE_DB_PATH`: Local offline DB path.
 
 2. Install dependencies:
 

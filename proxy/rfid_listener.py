@@ -140,14 +140,14 @@ async def receive_from_hub(request: Request):
     hub_state = get_hub_state(timing_point)
     reader_label = "Reader 1 (START)" if timing_point == TimingPoint.START else "Reader 2 (END)"
 
-    logger.debug(f"[READER-{timing_point.value.upper()}] {reader_label} - Incoming request from {request.client.host if request.client else 'unknown'}")
-    logger.debug(f"[READER-{timing_point.value.upper()}] Headers: {dict(request.headers)}")
-    logger.debug(f"[READER-{timing_point.value.upper()}] Raw payload: {data}")
+    # logger.debug(f"[READER-{timing_point.value.upper()}] {reader_label} - Incoming request from {request.client.host if request.client else 'unknown'}")
+    # logger.debug(f"[READER-{timing_point.value.upper()}] Headers: {dict(request.headers)}")
+    # logger.debug(f"[READER-{timing_point.value.upper()}] Raw payload: {data}")
 
     event_type = data.get("event_type") if isinstance(data, dict) else None
     event_data = data.get("event_data", []) if isinstance(data, dict) else []
 
-    logger.info(f"[READER-{timing_point.value.upper()}] {reader_label} - event_type={event_type}, data_count={len(event_data) if isinstance(event_data, list) else 'N/A'}")
+    # logger.info(f"[READER-{timing_point.value.upper()}] {reader_label} - event_type={event_type}, data_count={len(event_data) if isinstance(event_data, list) else 'N/A'}")
 
     if event_type in ["tag_read", "tag_coming"]:
         return await handle_tag_events(event_data, timing_point, hit_timestamp)
@@ -163,7 +163,7 @@ async def receive_from_hub(request: Request):
         if isinstance(event_data, list) and event_data:
             states = "".join([str(gpi.get("state", "0")) for gpi in event_data])
             hub_state["gpi_states"] = states
-            logger.info(f"[GPIO-{timing_point.value.upper()}] GPIO state changed: {states}")
+            # logger.info(f"[GPIO-{timing_point.value.upper()}] GPIO state changed: {states}")
         else:
             logger.warning(f"[GPIO-{timing_point.value.upper()}] Invalid GPI data: {event_data}")
         return {"status": "ok", "gpi_updated": True}
@@ -176,30 +176,29 @@ async def receive_from_hub(request: Request):
         logger.error(f"[HUB_ERROR-{timing_point.value.upper()}] Full error data: {event_data}")
         return {"status": "error", "error_code": err_code}
 
-    logger.warning(f"[READER-{timing_point.value.upper()}] Unknown event type: {event_type}")
-    logger.debug(f"[READER-{timing_point.value.upper()}] Unknown event data: {event_data}")
+    # logger.debug(f"[READER-{timing_point.value.upper()}] Unknown event data: {event_data}")
     return {"status": "unknown_event", "event_type": event_type}
 
 
 async def handle_tag_events(tags: List[Dict[str, Any]], timing_point: TimingPoint, hit_timestamp: str):
     tp_label = timing_point.value.upper()
-    logger.debug(f"[TAG_HANDLER-{tp_label}] Received tags data: type={type(tags)}, content={tags}")
+    # logger.debug(f"[TAG_HANDLER-{tp_label}] Received tags data: type={type(tags)}, content={tags}")
 
     if not isinstance(tags, list) or not tags:
-        logger.warning(f"[TAG_HANDLER-{tp_label}] No valid tags to process (type: {type(tags)})")
+        # logger.warning(f"[TAG_HANDLER-{tp_label}] No valid tags to process (type: {type(tags)})")
         return {"status": "ok", "tags_processed": 0, "timing_point": timing_point.value}
 
-    logger.info(f"[TAG_HANDLER-{tp_label}] Processing {len(tags)} tag(s)")
+    # logger.info(f"[TAG_HANDLER-{tp_label}] Processing {len(tags)} tag(s)")
     processed_count = 0
     errors: List[Dict[str, Any]] = []
 
     for idx, tag in enumerate(tags):
         try:
-            logger.debug(f"[TAG_HANDLER-{tp_label}] Processing tag #{idx + 1}: {tag}")
+            # logger.debug(f"[TAG_HANDLER-{tp_label}] Processing tag #{idx + 1}: {tag}")
             rfid = tag.get("ep") or tag.get("epc")
 
             if not rfid:
-                logger.warning(f"[TAG_HANDLER-{tp_label}] Tag #{idx + 1} missing RFID field: {tag}")
+                # logger.warning(f"[TAG_HANDLER-{tp_label}] Tag #{idx + 1} missing RFID field: {tag}")
                 errors.append({"error": "Missing RFID field", "tag": tag})
                 continue
 
@@ -231,9 +230,9 @@ async def handle_tag_events(tags: List[Dict[str, Any]], timing_point: TimingPoin
 
     if errors:
         response["errors"] = errors
-        logger.warning(f"[TAG_HANDLER-{tp_label}] Completed with {len(errors)} error(s)")
+        # logger.warning(f"[TAG_HANDLER-{tp_label}] Completed with {len(errors)} error(s)")
 
-    logger.info(f"[TAG_HANDLER-{tp_label}] Processing complete: {processed_count}/{len(tags)} tags scheduled for forwarding")
+    # logger.info(f"[TAG_HANDLER-{tp_label}] Processing complete: {processed_count}/{len(tags)} tags scheduled for forwarding")
     return response
 
 
@@ -271,7 +270,7 @@ def launch_forward_task(payload: Dict[str, Any], tp_label: str) -> None:
 
     def _log_result(task_obj: asyncio.Task):
         if task_obj.cancelled():
-            logger.warning(f"[FORWARD-{tp_label}] Task cancelled")
+            # logger.warning(f"[FORWARD-{tp_label}] Task cancelled")
             return
         exc = task_obj.exception()
         if exc:
@@ -285,7 +284,7 @@ async def forward_to_backend_async(payload: Dict[str, Any], tp_label: str) -> No
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(backend_endpoint, json=payload)
-            logger.debug(f"[FORWARD-{tp_label}] Backend response: status={response.status_code}, body={response.text}")
+            # logger.debug(f"[FORWARD-{tp_label}] Backend response: status={response.status_code}, body={response.text}")
             if response.status_code not in (200, 201):
                 logger.warning(f"[FORWARD-{tp_label}] Backend returned {response.status_code} for {payload.get('rfid')}")
     except httpx.TimeoutException as exc:
@@ -320,7 +319,7 @@ async def test_scan(request: Request):
 
     launch_forward_task(payload, tp_label)
 
-    logger.info(f"[TEST-{tp_label}] Test scan initiated: {rfid} on antenna {antenna}")
+    # logger.info(f"[TEST-{tp_label}] Test scan initiated: {rfid} on antenna {antenna}")
 
     return {
         "test": True,

@@ -76,15 +76,15 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing database and running migrations...")
+    # logger.info("Initializing database and running migrations...")
     initialize_database()
     run_migrations()
-    logger.info("Startup complete")
+    # logger.info("Startup complete")
     
     yield
-    logger.info("Shutting down services...")
+    # logger.info("Shutting down services...")
     shutdown_database()
-    logger.info("Shutdown complete")
+    # logger.info("Shutdown complete")
 
 
 app = FastAPI(
@@ -310,8 +310,8 @@ async def login(payload: LoginRequest, db: Session = Depends(get_db_session)):
         # Case-insensitive attempt
         try:
             user = db.query(User).filter(func.lower(User.username) == payload.username.lower()).first()
-            if user:
-                logger.info(f"Case-insensitive username match: provided={payload.username!r}, matched={user.username!r}")
+            # if user:
+            #     logger.info(f"Case-insensitive username match: provided={payload.username!r}, matched={user.username!r}")
         except Exception:
             # Ignore DB errors here, will surface later
             logger.debug("Case-insensitive username lookup failed or not supported")
@@ -689,7 +689,7 @@ async def rfid_hit_unified(
     }
     """
     try:
-        logger.info(f"[RFID_HIT] Raw payload: rfid={getattr(payload, 'rfid', 'N/A')}, rfid_tag={payload.rfid_tag}, reader_name={payload.reader_name}, timing_point={payload.timing_point}")
+        # logger.info(f"[RFID_HIT] Raw payload: rfid={getattr(payload, 'rfid', 'N/A')}, rfid_tag={payload.rfid_tag}, reader_name={payload.reader_name}, timing_point={payload.timing_point}")
         
         # The validator already normalizes rfid_tag and derives timing_point
         rfid_tag = payload.rfid_tag
@@ -702,7 +702,6 @@ async def rfid_hit_unified(
         timing_point = payload.timing_point or "start"
         hit_timestamp = payload.hit_timestamp  # Timestamp from proxy/listener
         
-        logger.info(f"[RFID_HIT] Processing {timing_point.upper()} RFID: {rfid_tag} (reader: {payload.reader_name or 'auto-detected'}, timestamp: {hit_timestamp})")
         
         # Route to appropriate handler based on timing_point
         if timing_point == "end":
@@ -745,7 +744,7 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
     3. Find the participant with this RFID
     4. Apply appropriate logic based on race status
     """
-    logger.info(f"[RFID_START] Processing start RFID: {rfid_tag}")
+    # logger.info(f"[RFID_START] Processing start RFID: {rfid_tag}")
     
     try:
         # Use provided timestamp from proxy, or fallback to current time
@@ -755,18 +754,18 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
                 # Ensure timezone-aware (add Asia/Kolkata if naive)
                 if current_time.tzinfo is None:
                     current_time = current_time.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
-                logger.info(f"[RFID_START] Using proxy timestamp: {hit_timestamp}")
+                # logger.info(f"[RFID_START] Using proxy timestamp: {hit_timestamp}")
             except Exception as e:
                 logger.warning(f"[RFID_START] Failed to parse hit_timestamp '{hit_timestamp}': {e}; using current time")
                 current_time = get_current_timestamp_utc()
         else:
             current_time = get_current_timestamp_utc()
-            logger.debug(f"[RFID_START] No proxy timestamp provided; using backend time: {current_time}")
+            # logger.debug(f"[RFID_START] No proxy timestamp provided; using backend time: {current_time}")
         
         # Get today's date in Asia/Kolkata to align with local race scheduling
         today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
         today_str = today.isoformat()
-        logger.info(f"[RFID_START] Looking for races scheduled for today (Asia/Kolkata): {today_str}")
+        # logger.info(f"[RFID_START] Looking for races scheduled for today (Asia/Kolkata): {today_str}")
         
         # Find today's race
         query = text("""
@@ -793,7 +792,7 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
         table_name_value = getattr(race_row, "table_name", None)
         table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race_name}_participants"
         
-        logger.info(f"[RFID_START] Found race: {race_name} (id={race_id}, status={race_status}) - table: {table_name}")
+        # logger.info(f"[RFID_START] Found race: {race_name} (id={race_id}, status={race_status}) - table: {table_name}")
         
         # Find the participant with this RFID in today's race table
         participant_row = db.execute(
@@ -814,12 +813,12 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
         current_status = getattr(participant_row, "status", "registered")
         existing_start_time = getattr(participant_row, "start_time", None)
         
-        logger.info(f"[RFID_START] Found participant {participant_id} in {race_name} with status: {current_status}, existing_start_time: {existing_start_time}")
+        # logger.info(f"[RFID_START] Found participant {participant_id} in {race_name} with status: {current_status}, existing_start_time: {existing_start_time}")
 
         # Precedence rule: completed > running > grace > registered
         # If participant is already completed, do NOT change status or start_time
         if current_status == "completed":
-            logger.info(f"[RFID_START] Participant {participant_id} already 'completed'; ignoring start hit (no changes)")
+            # logger.info(f"[RFID_START] Participant {participant_id} already 'completed'; ignoring start hit (no changes)")
             response = RFIDHitResponse(
                 success=True,
                 message=f"Runner already completed in {race_name}; ignoring start hit",
@@ -829,16 +828,16 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
         
         # CASE 1: Race is NOT started (idle status)
         if race_status != "started":
-            logger.info(f"[RFID_START] Race {race_name} is in {race_status} status (not started)")
+            # logger.info(f"[RFID_START] Race {race_name} is in {race_status} status (not started)")
             # Do not downgrade 'running' to 'grace'; only set grace for registered/grace
             if current_status in ("registered", "grace"):
-                logger.info(f"[RFID_START] Setting participant {participant_id} status='grace', start_time=null")
+                # logger.info(f"[RFID_START] Setting participant {participant_id} status='grace', start_time=null")
                 db.execute(
                     text(f'UPDATE "{table_name}" SET status = :status, start_time = NULL, end_time = NULL WHERE id = :pid'),
                     {"status": "grace", "pid": participant_id}
                 )
                 db.commit()
-                logger.info(f"✓ Updated RFID {rfid_tag} to status 'grace' (race not started) in {race_name}")
+                # logger.info(f"✓ Updated RFID {rfid_tag} to status 'grace' (race not started) in {race_name}")
                 response = RFIDHitResponse(
                     success=True,
                     message=f"Runner marked at start line (grace) in {race_name}",
@@ -847,7 +846,7 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
                 return create_success_response(response.model_dump())
             else:
                 # current_status is 'running' (or any higher precedence), do nothing
-                logger.info(f"[RFID_START] Participant {participant_id} status '{current_status}' has precedence; no update while race not started")
+                # logger.info(f"[RFID_START] Participant {participant_id} status '{current_status}' has precedence; no update while race not started")
                 response = RFIDHitResponse(
                     success=True,
                     message=f"Race not started; keeping status '{current_status}'",
@@ -856,13 +855,13 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
                 return create_success_response(response.model_dump())
         
         # CASE 2: Race IS started
-        logger.info(f"[RFID_START] Race {race_name} is in 'started' status")
+        # logger.info(f"[RFID_START] Race {race_name} is in 'started' status")
         
         # Check if this RFID already has a start_time
         if existing_start_time:
             # Calculate time gap between recorded start_time and this RFID hit
             time_gap = (current_time - existing_start_time).total_seconds()
-            logger.info(f"[RFID_START] RFID already has start_time: {existing_start_time}, gap={time_gap}s")
+            # logger.info(f"[RFID_START] RFID already has start_time: {existing_start_time}, gap={time_gap}s")
 
             # if 5 < time_gap < 300:
             #     # Gap is within (5s, 5min): Update start_time and set status to running
@@ -900,14 +899,14 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
             #     return create_success_response(response.model_dump())
             # else:
                 # Gap too large (>= 5min): do not update start_time
-            logger.info(f"[RFID_START] Time gap {time_gap}s >= 300s; NOT updating start_time")
+            # logger.info(f"[RFID_START] Time gap {time_gap}s >= 300s; NOT updating start_time")
             if current_status != "running":
                 db.execute(
                     text(f'UPDATE "{table_name}" SET status = :status WHERE id = :pid'),
                     {"status": "running", "pid": participant_id}
                 )
                 db.commit()
-                logger.info(f"[RFID_START] Updated status to 'running' (keeping existing start_time)")
+                # logger.info(f"[RFID_START] Updated status to 'running' (keeping existing start_time)")
 
             response = RFIDHitResponse(
                 success=True,
@@ -917,7 +916,7 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
             return create_success_response(response.model_dump())
         else:
             # No existing start_time: Set it to current time
-            logger.info(f"[RFID_START] RFID has no start_time, setting to {current_time}")
+            # logger.info(f"[RFID_START] RFID has no start_time, setting to {current_time}")
             
             db.execute(
                 text(f'UPDATE "{table_name}" SET status = :status, start_time = :ts WHERE id = :pid'),
@@ -925,7 +924,7 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
             )
             db.commit()
             
-            logger.info(f"✓ Updated RFID {rfid_tag} to status 'running' with start_time={current_time} in {race_name}")
+            # logger.info(f"✓ Updated RFID {rfid_tag} to status 'running' with start_time={current_time} in {race_name}")
             
             response = RFIDHitResponse(
                 success=True,
@@ -965,7 +964,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
     5. If no: Skip (return not ready message)
     """
     try:
-        logger.info(f"[RFID_END] Processing end RFID: {rfid_tag}")
+        # logger.info(f"[RFID_END] Processing end RFID: {rfid_tag}")
         
         # Use provided timestamp from proxy, or fallback to current time
         if hit_timestamp:
@@ -975,7 +974,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
                 # Ensure timezone-aware (add Asia/Kolkata if naive)
                 if current_time.tzinfo is None:
                     current_time = current_time.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
-                logger.info(f"[RFID_END] Using proxy timestamp: {hit_timestamp}")
+                # logger.info(f"[RFID_END] Using proxy timestamp: {hit_timestamp}")
             except Exception as e:
                 logger.warning(f"[RFID_END] Failed to parse hit_timestamp '{hit_timestamp}': {e}; using current time")
                 current_time = get_current_timestamp_utc()
@@ -986,7 +985,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         # Get today's date in Asia/Kolkata to align with local race scheduling
         today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
         today_str = today.isoformat()
-        logger.info(f"[RFID_END] Today's date (Asia/Kolkata): {today_str}")
+        # logger.info(f"[RFID_END] Today's date (Asia/Kolkata): {today_str}")
         
         # Find today's race with status='started'
         query = text("""
@@ -1012,7 +1011,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         table_name_value = getattr(race_row, "table_name", None)
         table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race_name}_participants"
         
-        logger.info(f"[RFID_END] Found active race: {race_name} (id={race_id}) - table: {table_name}")
+        # logger.info(f"[RFID_END] Found active race: {race_name} (id={race_id}) - table: {table_name}")
         
         # Find the participant with this RFID
         participant_row = db.execute(
@@ -1033,7 +1032,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         participant_status = getattr(participant_row, "status", None)
         existing_end_time = getattr(participant_row, "end_time", None)
         
-        logger.info(f"[RFID_END] Found participant {participant_id} in {race_name} with status: {participant_status}, end_time: {existing_end_time}")
+        # logger.info(f"[RFID_END] Found participant {participant_id} in {race_name} with status: {participant_status}, end_time: {existing_end_time}")
         
         # Check if status is 'running' (only then can we record end time)
         if participant_status != "running":
@@ -1056,7 +1055,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
             return create_success_response(response.model_dump())
         
         # Record end time with timestamp from proxy and set status to 'completed'
-        logger.info(f"[RFID_END] Recording end time: {current_time} for participant {participant_id}")
+        # logger.info(f"[RFID_END] Recording end time: {current_time} for participant {participant_id}")
         
         db.execute(
             text(f'UPDATE "{table_name}" SET end_time = :ts, status = :status WHERE id = :pid'),
@@ -1064,7 +1063,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         )
         db.commit()
         
-        logger.info(f"✓ Recorded end time for RFID {rfid_tag} in race {race_name}, status set to 'completed'")
+        # logger.info(f"✓ Recorded end time for RFID {rfid_tag} in race {race_name}, status set to 'completed'")
         
         response = RFIDHitResponse(
             success=True,
@@ -1090,7 +1089,6 @@ async def record_rfid_start_from_listener(
 ):
     """
     Accept RFID start hit from RFID Listener service (port 9090).
-    ONLY accepts requests from localhost:9090.
     
     Logic:
     1. If race NOT started: Set status='grace', start_time=null, end_time=null
@@ -1135,7 +1133,7 @@ async def record_rfid_start_from_listener(
         table_name_value = getattr(race_row, "table_name", None)
         table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race_name}_participants"
         
-        logger.info(f"[RFID_START] Found race: {race_name}, status={race_status}")
+        # logger.info(f"[RFID_START] Found race: {race_name}, status={race_status}")
         
         # Find the participant with this RFID
         participant_row = db.execute(
@@ -1160,7 +1158,7 @@ async def record_rfid_start_from_listener(
         
         # CASE 1: Race is NOT started
         if race_status != "started":
-            logger.info(f"[RFID_START] Race not started, setting status='grace'")
+            # logger.info(f"[RFID_START] Race not started, setting status='grace'")
             
             db.execute(
                 text(f'UPDATE "{table_name}" SET status = :status, start_time = NULL, end_time = NULL WHERE id = :pid'),
@@ -1168,7 +1166,7 @@ async def record_rfid_start_from_listener(
             )
             db.commit()
             
-            logger.info(f"✓ Updated RFID {rfid_tag} to status 'grace'")
+            # logger.info(f"✓ Updated RFID {rfid_tag} to status 'grace'")
             
             response = RFIDHitResponse(
                 success=True,
@@ -1178,21 +1176,21 @@ async def record_rfid_start_from_listener(
             return create_success_response(response.model_dump())
         
         # CASE 2: Race IS started
-        logger.info(f"[RFID_START] Race started, checking start_time logic")
+        # logger.info(f"[RFID_START] Race started, checking start_time logic")
         
         if existing_start_time:
             time_gap = (current_time - existing_start_time).total_seconds()
-            logger.info(f"[RFID_START] Existing start_time: {existing_start_time}, gap={time_gap}s")
+            # logger.info(f"[RFID_START] Existing start_time: {existing_start_time}, gap={time_gap}s")
             
             if time_gap > 5:
-                logger.info(f"[RFID_START] Gap > 5s, updating start_time")
+                # logger.info(f"[RFID_START] Gap > 5s, updating start_time")
                 db.execute(
                     text(f'UPDATE "{table_name}" SET status = :status, start_time = :ts WHERE id = :pid'),
                     {"status": "running", "ts": current_time, "pid": participant_id}
                 )
                 db.commit()
                 
-                logger.info(f"✓ Updated RFID {rfid_tag} to status 'running' with new start_time")
+                # logger.info(f"✓ Updated RFID {rfid_tag} to status 'running' with new start_time")
                 
                 response = RFIDHitResponse(
                     success=True,
@@ -1201,7 +1199,7 @@ async def record_rfid_start_from_listener(
                 )
                 return create_success_response(response.model_dump())
             else:
-                logger.info(f"[RFID_START] Gap <= 5s, NOT updating start_time")
+                # logger.info(f"[RFID_START] Gap <= 5s, NOT updating start_time")
                 
                 if current_status != "running":
                     db.execute(
@@ -1217,7 +1215,7 @@ async def record_rfid_start_from_listener(
                 )
                 return create_success_response(response.model_dump())
         else:
-            logger.info(f"[RFID_START] No existing start_time, setting to {current_time}")
+            # logger.info(f"[RFID_START] No existing start_time, setting to {current_time}")
             
             db.execute(
                 text(f'UPDATE "{table_name}" SET status = :status, start_time = :ts WHERE id = :pid'),
@@ -1225,7 +1223,7 @@ async def record_rfid_start_from_listener(
             )
             db.commit()
             
-            logger.info(f"✓ Updated RFID {rfid_tag} to status 'running' with start_time={current_time}")
+            # logger.info(f"✓ Updated RFID {rfid_tag} to status 'running' with start_time={current_time}")
             
             response = RFIDHitResponse(
                 success=True,
@@ -1251,7 +1249,6 @@ async def record_rfid_end_from_listener(
 ):
     """
     Accept RFID end hit from RFID Listener service (port 9090).
-    ONLY accepts requests from localhost:9090.
     Immediately assigns endTIME to the runner.
     
     Flow:
@@ -1366,7 +1363,7 @@ async def start_race_group(
         grace_count = update_result.rowcount if update_result.rowcount is not None else 0
         db.commit()
         
-        logger.info(f"✓ Updated {grace_count} grace status participants with start_time={timestamp_iso}")
+        # logger.info(f"✓ Updated {grace_count} grace status participants with start_time={timestamp_iso}")
         
         # Update race status from 'created' to 'started' AND race status from 'created' to 'started'
         db.execute(
@@ -1375,7 +1372,7 @@ async def start_race_group(
         )
         db.commit()
         
-        logger.info(f"✓ Updated race {race_id} status to 'started'")
+        # logger.info(f"✓ Updated race {race_id} status to 'started'")
         
         response = RaceGroupStartResponse(
             success=True,

@@ -6,9 +6,12 @@ Simulates the actual hardware format from tag_server.js
 import requests
 import json
 import time
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # Configuration
-BASE_URL = "http://localhost:9090"
+BASE_URL = os.getenv("RFID_LISTENER_URL", "http://localhost:9090")
 
 def test_tag_read_start():
     """Simulate start reader tag read"""

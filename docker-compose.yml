@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rfid-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    networks:
+      - rfid-net
+
+  proxy:
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    container_name: rfid-proxy
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+    env_file:
+      - .env
+    networks:
+      - rfid-net
+
+networks:
+  rfid-net:
+    driver: bridge
