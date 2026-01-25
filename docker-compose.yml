@@ -2,19 +2,15 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+    network_mode: host
     container_name: rfid-backend
     dns:
       - 8.8.8.8
       - 1.1.1.1
-    ports:
-      - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
     env_file:
       - backend/.env
-    networks:
-      - rfid-net
 
   proxy:
     build:
