@@ -4,6 +4,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: rfid-backend
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "8000:8000"
     environment:
@@ -18,6 +21,9 @@ services:
       context: ./proxy
       dockerfile: Dockerfile
     container_name: rfid-proxy
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "9090:9090"
     depends_on:
