@@ -16,7 +16,7 @@ function createWindow() {
   });
 
   win.loadFile(path.join(__dirname, "../index.html"));
-  win.webContents.openDevTools({ mode: "detach" });
+  // win.webContents.openDevTools({ mode: "detach" });
 
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
     console.error("[main] failed to load renderer", { errorCode, errorDescription });

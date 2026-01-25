@@ -9,6 +9,6 @@ RUN pip install --no-cache-dir fastapi uvicorn httpx python-dotenv
 COPY . /app/
 
 ENV PYTHONUNBUFFERED=1
-EXPOSE 9090
+EXPOSE 9091
 
-CMD ["uvicorn", "rfid_listener:app", "--host", "0.0.0.0", "--port", "9090", "--proxy-headers"]
+CMD ["uvicorn", "rfid_listener:app", "--host", "0.0.0.0", "--port", "9091", "--proxy-headers"]

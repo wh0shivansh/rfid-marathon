@@ -1088,7 +1088,7 @@ async def record_rfid_start_from_listener(
     db: Session = Depends(get_db_session)
 ):
     """
-    Accept RFID start hit from RFID Listener service (port 9090).
+    Accept RFID start hit from RFID Listener service (port 9091).
     
     Logic:
     1. If race NOT started: Set status='grace', start_time=null, end_time=null
@@ -1248,7 +1248,7 @@ async def record_rfid_end_from_listener(
     db: Session = Depends(get_db_session)
 ):
     """
-    Accept RFID end hit from RFID Listener service (port 9090).
+    Accept RFID end hit from RFID Listener service (port 9091).
     Immediately assigns endTIME to the runner.
     
     Flow:
@@ -1468,18 +1468,6 @@ async def get_race_group(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch group details"
         )
-
-
-# NOTE: SYNC HANDSHAKE ENDPOINT DEPRECATED (January 23, 2026)
-# The old sync_handshake endpoint that confirmed timing record syncs is no longer needed
-# since all timing data is now written directly to per-race participant tables by the proxy listener.
-# Legacy endpoint removed.
-
-
-# NOTE: RFID SYNC ENDPOINTS DEPRECATED (January 23, 2026)
-# The listener (9090) no longer maintains state files. All RFID data is now sent
-# directly to /api/v1/rfid/record-start and /api/v1/rfid/record-end endpoints via the proxy listener.
-# Legacy endpoints /rfid/sync and /rfid/stats removed.
 
 
 # ============================================================================

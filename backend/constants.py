@@ -42,8 +42,8 @@ ENCRYPTION_ALGORITHM: Final[str] = "Fernet"  # Symmetric encryption for DB
 
 # RFID Hub Authentication
 RFID_HUB_KEY_ENCRYPTION_ALGORITHM: Final[str] = "Fernet"  # Encrypt hub secrets with Fernet
-RFID_START_HUB_PORT: Final[int] = 9090  # Dedicated listener port
-RFID_END_HUB_PORT: Final[int] = 9090   # Same listener port, validates different keys
+RFID_START_HUB_PORT: Final[int] = 9091  # Dedicated listener port
+RFID_END_HUB_PORT: Final[int] = 9091   # Same listener port, validates different keys
 
 # ============================================================================
 # DATABASE CONSTANTS
@@ -103,8 +103,8 @@ HTTP_INTERNAL_ERROR: Final[int] = 500
 # RFID LISTENER CONSTANTS
 # ============================================================================
 
-# RFID Listener Service (Port 9090)
-RFID_LISTENER_PORT: Final[int] = 9090
+# RFID Listener Service (Port 9091)
+RFID_LISTENER_PORT: Final[int] = 9091
 RFID_LISTENER_HOST: Final[str] = "0.0.0.0"
 
 # Grace period for late arrivals (seconds) - candidates can still be added during this window
@@ -126,7 +126,7 @@ RFID_END_READER_NAMES: Final[list] = ["Reader 2", "end", "End"] + os.getenv("RFI
 # RACE STATE CONSTANTS (BACKEND ONLY)
 # ============================================================================
 
-# Race state persistence - BACKEND ONLY, NOT used by listener (9090)
+# Race state persistence - BACKEND ONLY, NOT used by listener (9091)
 # The listener is now stateless and forwards all RFID hits directly to backend
 # Backend manages all race state (groups, grace periods, locking) via this file
 RACE_STATE_FILE: Final[str] = "race_state.json"  # Relative to backend root
