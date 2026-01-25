@@ -5,8 +5,8 @@ WORKDIR /app
 # Install minimal runtime dependencies used by the proxy
 RUN pip install --no-cache-dir fastapi uvicorn httpx python-dotenv
 
-# Copy proxy source
-COPY proxy/ /app/
+# Copy proxy source (copy the entire build context)
+COPY . /app/
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 9090
