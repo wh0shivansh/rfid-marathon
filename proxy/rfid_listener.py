@@ -8,18 +8,20 @@ RFID Marathon Management System - Unified RFID Listener (FastAPI)
 import asyncio
 import logging
 import os
+from dotenv import load_dotenv
+load_dotenv()
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 
-app = FastAPI(title="RFID Listener", version="2.0.0")
+app = FastAPI(title="RFID Listener", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,

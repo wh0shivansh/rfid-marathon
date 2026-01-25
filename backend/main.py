@@ -658,25 +658,8 @@ async def list_participants_by_race(
 
 
 # ============================================================================
-# RFID HUB ENDPOINTS (LISTENER SERVICE ON LOCALHOST:9090)
+# RFID HUB ENDPOINTS 
 # ============================================================================
-
-def _verify_localhost_only(request: Request) -> bool:
-    """
-    Verify request comes from localhost only.
-    This endpoint should ONLY accept requests from the RFID listener on 9090.
-    
-    Returns:
-        bool: True if request is from localhost
-    """
-    client_host = request.client.host if request.client else None
-    is_localhost = client_host in ["127.0.0.1", "localhost", "::1"]
-    
-    if not is_localhost:
-        logger.warning(f"✗ RFID hit from non-localhost: {client_host}")
-    
-    return is_localhost
-
 
 @app.post(f"{API_PREFIX}/rfid/hit")
 async def rfid_hit_unified(
@@ -707,14 +690,6 @@ async def rfid_hit_unified(
     """
     try:
         logger.info(f"[RFID_HIT] Raw payload: rfid={getattr(payload, 'rfid', 'N/A')}, rfid_tag={payload.rfid_tag}, reader_name={payload.reader_name}, timing_point={payload.timing_point}")
-        
-        # Verify request is from localhost only
-        if not _verify_localhost_only(request):
-            logger.error("✗ Rejected RFID hit from non-localhost source")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only localhost can submit RFID records"
-            )
         
         # The validator already normalizes rfid_tag and derives timing_point
         rfid_tag = payload.rfid_tag
@@ -1123,15 +1098,7 @@ async def record_rfid_start_from_listener(
        - Set status='running'
        - Set start_time to current time (RFID hit time)
        - BUT if RFID already exists with start_time, only update if gap > 10 seconds
-    """
-    # Verify request is from localhost only
-    if not _verify_localhost_only(request):
-        logger.error("✗ Rejected RFID hit from non-localhost source")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only localhost:9090 can submit RFID records"
-        )
-    
+    """  
     rfid_tag_raw = payload.rfid_tag or getattr(payload, "rfid", None)
     if not rfid_tag_raw:
         raise HTTPException(
@@ -1293,13 +1260,6 @@ async def record_rfid_end_from_listener(
     3. Backend finds the race where this RFID has a startTIME
     4. Backend assigns endTIME with current server timestamp
     """
-    # Verify request is from localhost only
-    if not _verify_localhost_only(request):
-        logger.error("✗ Rejected end RFID from non-localhost source")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only localhost:9090 can submit RFID records"
-        )
     
     rfid_tag_raw = payload.rfid_tag or getattr(payload, "rfid", None)
     if not rfid_tag_raw:
