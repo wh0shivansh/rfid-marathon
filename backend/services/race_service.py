@@ -158,6 +158,9 @@ class RaceService:
         - category (String)
         - registered_at (DateTime with timezone)
         - encryption_key_id (UUID, foreign key to encryption_keys)
+        - start_time (DateTime with timezone, nullable)
+        - end_time (DateTime with timezone, nullable)
+        - status (String, created/started/completed)
         
         Args:
             db: Database session
@@ -177,7 +180,9 @@ class RaceService:
                     category VARCHAR(50),
                     registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
                     encryption_key_id UUID NOT NULL REFERENCES encryption_keys(id),
-                    
+                    start_time TIMESTAMPTZ WITH TIME ZONE,
+                    end_time TIMESTAMPTZ WITH TIME ZONE,
+                    status VARCHAR(20) NOT NULL,
                     CONSTRAINT uq_{table_name}_race_rfid UNIQUE (race_id, rfid_tag),
                     CONSTRAINT check_{table_name}_age CHECK (age >= 5 AND age <= 120),
                     CONSTRAINT check_{table_name}_gender CHECK (gender IN ('M', 'F', 'O'))
