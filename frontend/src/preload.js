@@ -43,7 +43,7 @@ const fernetWrapper = {
 
 contextBridge.exposeInMainWorld("secureApi", {
   getConfig: () => ({
-    apiBaseUrl: getEnv("VITE_API_BASE_URL", "http://localhost:8000/api/v1"),
+    apiBaseUrl: getEnv("VITE_API_BASE_URL", "http://localhost:8001/api/v1"),
     // Prefer explicit frontend-specific env vars, but fall back to backend USERNAME/PASSWORD
     username: getEnv("FRONTEND_USERNAME", getEnv("USERNAME", "")),
     password: getEnv("FRONTEND_PASSWORD", getEnv("PASSWORD", "")),
