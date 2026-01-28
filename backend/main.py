@@ -1088,7 +1088,7 @@ async def record_rfid_start_from_listener(
     db: Session = Depends(get_db_session)
 ):
     """
-    Accept RFID start hit from RFID Listener service (port 9091).
+    Accept RFID start hit from RFID Listener service (port 9090).
     
     Logic:
     1. If race NOT started: Set status='grace', start_time=null, end_time=null
@@ -1248,7 +1248,7 @@ async def record_rfid_end_from_listener(
     db: Session = Depends(get_db_session)
 ):
     """
-    Accept RFID end hit from RFID Listener service (port 9091).
+    Accept RFID end hit from RFID Listener service (port 9090).
     Immediately assigns endTIME to the runner.
     
     Flow:

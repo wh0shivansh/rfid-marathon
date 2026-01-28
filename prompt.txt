@@ -3,23 +3,23 @@ do not include emojis and include flowcharts and sequence diagrams for explanati
 
 ```
 A major change needs to be made in the backend server and update the old files completely with the logic i am going to explain below. and name the api as v2, this backend logic should be coded from scratch and should match with the frontend, update pydantic models and the orm models also.
-for 9091 server move the files in a separate folder in the root dir.
+for 9090 server move the files in a separate folder in the root dir.
 i know we already have a backend folder in the project dir but i want to completely update it with this new logic for the rfid hit and start time end time logic.
 
 START LINE LAPTOP-
-runs its own separate backend and 9091 proxy server requires frontend just to start the race and set the race
+runs its own separate backend and 9090 proxy server requires frontend just to start the race and set the race
 state from idle to active in the races table. 
 here when the race is in idle state the start time will be stored as null in then database. but when the frontend clicks start race button, all the racers in the per race table will have there start time set as the time the button was clicked with there state set as running. then after the race state is set as active whenever new rfid is detected its start time will be recorded and the state will be set as running. But i an already
 present rfid in the database hits the backend server then the server has to check the time difference between the start time of race and the rfid hit time if that time is greater than 10 secs then update the startime of that racer as the rfid hit time. (this is because what if the accidently racers rfid was scanned but  then he stood at the back of the line during the marathon start so he will again scan the rfid and we have to update the start time.)
 
 END LINE LAPTOP - 
-runs its own separate backend and 9091 proxy server
+runs its own separate backend and 9090 proxy server
 doesnt not require frontend
 it has its own seperate rfid hub
-the backend server on this laptop will only have very few api endpoints which will just allow the proxy 9091 server to record the endtime by first seeing the which race is currently active and then finding the rfid scanned by antenna in the per race table and mark the end time of the racers whose start time already present if not present then skip
+the backend server on this laptop will only have very few api endpoints which will just allow the proxy 9090 server to record the endtime by first seeing the which race is currently active and then finding the rfid scanned by antenna in the per race table and mark the end time of the racers whose start time already present if not present then skip
 
 REGISTRATION LAPTOP - 
-will not run any 9091 server
+will not run any 9090 server
 will only be used to register candidates to the race
 will run the backend and frontend server
 here the backend server will act as the intermediator between the database and the frontend for registration, race creation, data view, dashboard-data, etc endpoints.
