@@ -1,4 +1,7 @@
 export function renderRegistration(currentStep, scannedRFID, availableRaces, selectedRace, todayRegistrations = []) {
+  // Filter only races with status 'created'
+  const createdRaces = availableRaces.filter(r => r.status === 'created');
+  
   const registrationListHTML = todayRegistrations.length > 0 
     ? todayRegistrations.map(reg => `
         <div style="padding: 12px; margin: 8px 0; background: #0f172a; border-radius: 4px; border-left: 3px solid #22c55e;">
@@ -20,16 +23,16 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
             <button id="close-step-1" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 1.5em; padding: 0; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; transition: color 0.2s;">×</button>
           </div>
           <div style="padding: 16px;">
-            ${availableRaces.length > 0 ? `
+            ${createdRaces.length > 0 ? `
               <label style="display: block; color: #cbd5e1; margin-bottom: 8px; font-weight: 500;">Choose a race:</label>
               <select id="race-select-dropdown" style="width: 100%; padding: 12px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 1em; cursor: pointer;">
                 <option value="">-- Select a race --</option>
-                ${availableRaces.map(race => `
+                ${createdRaces.map(race => `
                   <option value="${race.id}" ${selectedRace === race.id ? 'selected' : ''}>${race.name} - ${race.distance_meters}m - ${race.location} (${new Date(race.scheduled_date).toLocaleDateString()})</option>
                 `).join('')}
               </select>
               <button id="continue-step1" style="margin-top: 16px; width: 100%; padding: 12px 16px; background: #3b82f6; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 1em; font-weight: 600;">Continue to RFID Scan →</button>
-            ` : '<p style="color: #cbd5e1; text-align: center; padding: 20px;">No races available. Create a race first.</p>'}
+            ` : '<p style="color: #cbd5e1; text-align: center; padding: 20px;">No races available for registration. All races are either active or completed.</p>'}
           </div>
         </div>
       </div>
@@ -66,7 +69,7 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
             <div style="grid-column: 1 / -1; padding: 16px; background: #1e293b; border-radius: 6px; border-left: 4px solid #3b82f6; margin-bottom: 20px;">
               <div style="font-size: 0.85em; color: #94a3b8; margin-bottom: 4px;">SELECTED RACE</div>
               <div id="race-info-step3" style="font-size: 1.05em; font-weight: 600; color: #e2e8f0;">${selectedRace ? (() => {
-                const race = availableRaces.find(r => r.id === selectedRace);
+                const race = createdRaces.find(r => r.id === selectedRace);
                 return race ? `${race.name} - ${race.location} (${new Date(race.scheduled_date).toLocaleDateString()}) - ${race.distance_meters}m` : 'Unknown Race';
               })() : ''}</div>
             </div>

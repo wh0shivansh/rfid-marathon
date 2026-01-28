@@ -252,13 +252,13 @@ class RFIDHitResponse(BaseModel):
     rfid_tag: Optional[str] = None
 
 
-class RaceGroupStartRequest(BaseModel):
-    """Request to start a race group (assign start times)"""
+class RaceStartRequest(BaseModel):
+    """Request to start a race (assign start times)"""
     race_id: str = Field(..., description="Race identifier")
     group_number: int = Field(..., ge=1, description="Group number to start")
 
 
-class RaceGroupStartResponse(BaseModel):
+class RaceStartResponse(BaseModel):
     """Response when group is started"""
     success: bool
     message: str
@@ -395,34 +395,6 @@ class Participant(Base):
         Index('idx_participants_status', 'status'),
         {'extend_existing': True}  # Allow redefinition without creating during migrations
     )
-
-
-# ---------------------------------------------------------------------------
-# Audit Log Model (IMMUTABLE)
-# ---------------------------------------------------------------------------
-
-class AuditLog(Base):
-    """Immutable audit log for all system actions"""
-    __tablename__ = "audit_log"
-
-    id = Column(UUID(as_uuid=False), primary_key=True, default=generate_uuid)
-    action = Column(String(100), nullable=False, index=True)
-    user_id = Column(UUID(as_uuid=False), ForeignKey('users.id'), nullable=True)
-    ip_address = Column(String(45), nullable=False)  # IPv6 compatible
-    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    request_path = Column(String(500), nullable=True)
-    request_method = Column(String(10), nullable=True)
-    status_code = Column(Integer, nullable=True)
-    details = Column(JSONB, nullable=True)  # Additional context
-    success = Column(Boolean, nullable=False)
-
-    __table_args__ = (
-        Index('idx_audit_action', 'action'),
-        Index('idx_audit_user_id', 'user_id'),
-        Index('idx_audit_timestamp', 'timestamp'),
-        Index('idx_audit_ip_address', 'ip_address'),
-    )
-
 
 # ---------------------------------------------------------------------------
 # Nonce Cache Model (for replay attack prevention)

@@ -146,7 +146,9 @@ TIMESTAMP_PRECISION: Final[int] = 3
 class RaceStatus(str, Enum):
     """Enumeration of race statuses"""
     CREATED = "created"           # Race created, not started
-    STARTED = "started"           # Race started by admin, participants are running
+    ACTIVE = "active"             # Race is currently active (only one can be active at a time)
+    STARTED = "started"           # Race started by admin, participants are running (deprecated, use ACTIVE)
+    ENDED = "ended"               # Race ended, all participants finished
     COMPLETED = "completed"       # Race completed, all participants finished
     
 # Race distance limits (meters)

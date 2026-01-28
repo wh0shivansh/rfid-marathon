@@ -1,19 +1,38 @@
 /**
- * RFID Marathon Management System - Race Group Start View
+ * RFID Marathon Management System - Start Race View
  * 
- * Displays admin interface to start race groups and monitor live RFID data.
+ * Displays admin interface to start race and monitor live RFID data.
  * Logic and event handlers are managed in app.js.
  * Data is fetched from backend API via polling (every 2 seconds).
  */
 
-export function renderRaceGroupStart() {
+export function renderRaceStart(races = [], selectedRaceId = null) {
+  // Find selected race to determine button state
+  const selectedRace = races.find(r => r.id === selectedRaceId);
+  const raceStatus = selectedRace?.status || 'created';
+  
+  // Determine button text and state
+  let buttonText = 'Start Race';
+  let buttonDisabled = false;
+  let buttonColor = '#10b981';
+  
+  if (raceStatus === 'active') {
+    buttonText = 'Started';
+    buttonDisabled = true;
+    buttonColor = '#6b7280';
+  } else if (raceStatus === 'ended') {
+    buttonText = 'Ended';
+    buttonDisabled = true;
+    buttonColor = '#6b7280';
+  }
+  
   return `
     <div class="page">
       <!-- Control Panel -->
-      <!-- Statistics Panel -->
+      ${selectedRaceId ? `
       <div class="panel" style="margin-top: 24px;">
         <div class="panel-header">Race Statistics</div>
-        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; padding: 16px;">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 16px;">
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #a78bfa; font-size: 12px; text-transform: uppercase;">Registered</div>
             <div id="stat-registered" style="color: #a78bfa; font-size: 24px; font-weight: bold;">0</div>
@@ -32,6 +51,7 @@ export function renderRaceGroupStart() {
           </div>
         </div>
       </div>
+      ` : ''}
       <div class="panel">
         <div class="panel-header">Start Race</div>
         
@@ -61,8 +81,11 @@ export function renderRaceGroupStart() {
           
           <!-- Action Buttons -->
           <div class="form-actions" style="grid-column: 1 / -1; display: flex; gap: 8px;">
-            <button type="submit" id="start-group-btn" style="flex: 1; background: #10b981;">
-              Start Race
+            <button type="submit" id="start-group-btn" style="flex: 1; background: ${buttonColor};" ${buttonDisabled ? 'disabled' : ''}>
+              ${buttonText}
+            </button>
+            <button type="button" id="end-race-btn" style="flex: 1; background: #ef4444;" ${raceStatus === 'active' ? '' : 'disabled'}>
+              End Race
             </button>
             <button type="button" id="refresh-btn" style="flex: 1; background: #0ea5e9;">
               Refresh
@@ -72,6 +95,7 @@ export function renderRaceGroupStart() {
       </div>
       
       <!-- Live Candidates Panel -->
+      ${selectedRaceId ? `
       <div class="panel" style="margin-top: 24px;">
         <div class="panel-header">Live Candidates (Real-time Updates)</div>
         <div id="groups-container" style="display: flex; flex-direction: column; gap: 16px;">
@@ -80,6 +104,7 @@ export function renderRaceGroupStart() {
           </div>
         </div>
       </div>
+      ` : ''}
     </div>
   `;
 }

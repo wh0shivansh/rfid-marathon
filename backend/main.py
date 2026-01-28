@@ -7,7 +7,6 @@ Main entrypoint for the backend API with:
 - Strict authentication (JWT + replay protection)
 - Encryption (Fernet at rest, RSA for responses)
 - Idempotent migrations on startup
-- Rate limiting and immutable audit logging
 - Grace period management for RFID group locking
 """
 
@@ -20,7 +19,7 @@ from dateutil import parser
 from zoneinfo import ZoneInfo
 from typing import Optional, Any, cast
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -49,12 +48,12 @@ from models import (
     ParticipantRegisterRequest,
     ParticipantLookupRequest,
     RFIDHitRequest,
-    RaceGroupStartRequest,
+    RaceStartRequest,
     RaceResponse,
     DashboardDataResponse,
     ParticipantResponse,
     RFIDHitResponse,
-    RaceGroupStartResponse,
+    RaceStartResponse,
 )
 from basefunctions import (
     create_success_response,
@@ -125,14 +124,12 @@ app.add_middleware(
 
 
 # ============================================================================
-# GLOBAL MIDDLEWARE (Rate limiting, audit logging, error handling)
+# GLOBAL MIDDLEWARE (Error handling)
 # ============================================================================
 
 @app.middleware("http")
-async def security_pipeline(request: Request, call_next):
-    """Global middleware for rate limiting and audit logging."""
-    start_time = time.time()
-
+async def error_handling_pipeline(request: Request, call_next):
+    """Global middleware for error handling."""
     # Request handling with error capture
     try:
         response = await call_next(request)
@@ -490,6 +487,83 @@ async def update_race(
     return create_success_response(RaceResponse.from_orm(race).dict())
 
 
+@app.delete(f"{API_PREFIX}/race/{{race_id}}")
+async def delete_race(
+    race_id: str,
+    db: Session = Depends(get_db_session),
+    user=Depends(get_current_user)
+):
+    """Delete a race. Cannot delete active races."""
+    race = race_service.get_race(db=db, race_id=race_id)
+    
+    # Avoid SQLAlchemy boolean expression in Python conditional by comparing to the enum value
+    if getattr(race, "status", None) == RaceStatus.ACTIVE.value:
+        raise ConflictError("Cannot delete an active race. End the race first.")
+    
+    # Delete the race (race_service should handle dropping participant table)
+    race_service.delete_race(db=db, race_id=race_id)
+    
+    return create_success_response({"message": "Race deleted successfully"})
+
+
+@app.post(f"{API_PREFIX}/race/{{race_id}}/start")
+async def start_race(
+    race_id: str,
+    db: Session = Depends(get_db_session),
+    user=Depends(get_current_user)
+):
+    """
+    Start a race:
+    1. Set status to 'active'
+    2. Ensure no other race is active
+    3. Set race start_time
+    """
+    from models import Race
+    
+    # Check if another race is already active
+    active_race = db.query(Race).filter(Race.status == RaceStatus.ACTIVE).first()
+    if active_race and str(active_race.id) != race_id:
+        raise ConflictError(f"Another race '{active_race.name}' is already active. Only one race can be active at a time.")
+    
+    # Update race status to active
+    race = race_service.update_race(
+        db=db,
+        race_id=race_id,
+        status=RaceStatus.ACTIVE,
+        start_time=get_current_timestamp_utc()
+    )
+    
+    return create_success_response({
+        "message": "Race started successfully",
+        "race": RaceResponse.from_orm(race).dict()
+    })
+
+
+@app.post(f"{API_PREFIX}/race/{{race_id}}/end")
+async def end_race(
+    race_id: str,
+    db: Session = Depends(get_db_session),
+    user=Depends(get_current_user)
+):
+    """
+    End a race:
+    1. Set status to 'ended'
+    2. Set race end_time
+    """
+    try:
+        # End the race; this sets status to 'ended' (irreversible)
+        race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.ENDED)
+        race_response = RaceResponse.model_validate(race, from_attributes=True)
+        return create_success_response(race_response.model_dump())
+    except ValidationError as ve:
+        raise ve
+    except NotFoundError as ne:
+        raise ne
+    except Exception as exc:
+        logger.exception(f"Failed to end race {race_id}: {exc}")
+        raise exc
+
+
 # ============================================================================
 # PARTICIPANT ENDPOINTS
 # ============================================================================
@@ -657,6 +731,218 @@ async def list_participants_by_race(
     return create_success_response(participants)
 
 
+@app.patch(f"{API_PREFIX}/participant/{{participant_id}}")
+async def update_participant(
+    participant_id: str,
+    payload: dict,
+    db: Session = Depends(get_db_session),
+    _user=Depends(get_current_user)
+):
+    """
+    Update a participant in the per-race table.
+    Only allowed if race status is 'created'.
+    
+    Args:
+        participant_id: Participant ID
+        payload: Updated fields (name, age, gender, category, rfid_tag)
+        
+    Returns:
+        Updated participant data
+        
+    Raises:
+        NotFoundError: If participant not found
+        ConflictError: If race is not in 'created' status
+        ValidationError: If validation fails
+    """
+    # Find participant - need to search all per-race tables
+    races = race_service.list_races(db=db)
+    participant_data = None
+    target_race = None
+    
+    for race in races:
+        table_name = getattr(race, "table_name", None)
+        if not table_name:
+            continue
+            
+        try:
+            query = text(f'SELECT * FROM "{table_name}" WHERE id = :participant_id')
+            result = db.execute(query, {"participant_id": participant_id}).fetchone()
+            if result:
+                participant_data = result
+                target_race = race
+                break
+        except Exception:
+            continue
+    
+    if not participant_data or not target_race:
+        raise NotFoundError("Participant", participant_id)
+    
+    # Check race status - only allow updates if race is 'created'
+    if getattr(target_race, "status", None) != "created":
+        raise ConflictError(
+            f"Cannot update participant. Race '{target_race.name}' is {getattr(target_race, 'status', 'unknown')}. "
+            "Participants can only be modified when race status is 'created'."
+        )
+    
+    # Build update query dynamically
+    update_fields = []
+    update_values = {"participant_id": participant_id}
+    
+    # Handle name encryption if provided
+    if "name" in payload and payload["name"]:
+        encrypted_name = fernet_manager.encrypt(payload["name"])
+        update_fields.append("encrypted_name = :encrypted_name")
+        update_values["encrypted_name"] = encrypted_name
+    
+    # Handle RFID tag update
+    if "rfid_tag" in payload and payload["rfid_tag"]:
+        rfid_tag = payload["rfid_tag"].upper()
+        
+        # Check for duplicate RFID in same race
+        table_name = target_race.table_name
+        check_sql = text(f"""
+            SELECT COUNT(*) as count FROM "{table_name}"
+            WHERE race_id = :race_id AND rfid_tag = :rfid_tag AND id != :participant_id
+        """)
+        result = db.execute(check_sql, {
+            "race_id": str(target_race.id),
+            "rfid_tag": rfid_tag,
+            "participant_id": participant_id
+        }).fetchone()
+        
+        if result and result[0] > 0:
+            raise ConflictError(
+                f"RFID tag {rfid_tag} is already assigned to another participant in this race"
+            )
+        
+        update_fields.append("rfid_tag = :rfid_tag")
+        update_values["rfid_tag"] = rfid_tag
+    
+    # Handle other fields
+    if "age" in payload:
+        update_fields.append("age = :age")
+        update_values["age"] = payload["age"]
+    
+    if "gender" in payload and payload["gender"]:
+        if payload["gender"] not in ["M", "F", "O"]:
+            raise ValidationError("Gender must be M, F, or O")
+        update_fields.append("gender = :gender")
+        update_values["gender"] = payload["gender"]
+    
+    if "category" in payload:
+        update_fields.append("category = :category")
+        update_values["category"] = payload["category"]
+
+    # If category not provided but age is, auto-calculate category using RFID service
+    if ("category" not in payload or not payload.get("category")) and "age" in payload:
+        try:
+            calc_cat = rfid_service._calculate_category(payload.get("age"))
+            if calc_cat:
+                update_fields.append("category = :category")
+                update_values["category"] = calc_cat
+        except Exception:
+            # If calculation fails, skip and let DB remain unchanged
+            pass
+    
+    if not update_fields:
+        raise ValidationError("No valid fields to update")
+    
+    # Execute update
+    table_name = target_race.table_name
+    update_sql = text(f"""
+        UPDATE "{table_name}"
+        SET {", ".join(update_fields)}
+        WHERE id = :participant_id
+        RETURNING id, race_id, rfid_tag, encrypted_name, age, gender, category, registered_at, encryption_key_id
+    """)
+    
+    result = db.execute(update_sql, update_values).fetchone()
+    if not result:
+        raise ApplicationError("Failed to update participant", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    db.commit()
+    
+    # Return updated participant
+    try:
+        key = fernet_manager.get_key_by_id(str(result.encryption_key_id))
+    except Exception:
+        key = None
+    
+    return create_success_response({
+        "id": str(result.id),
+        "race_id": str(result.race_id),
+        "rfid_tag": str(result.rfid_tag),
+        "encrypted_name": str(result.encrypted_name),
+        "encryption_key": key,
+        "encryption_key_id": str(result.encryption_key_id) if result.encryption_key_id else None,
+        "age": result.age,
+        "gender": result.gender,
+        "category": result.category,
+        "registered_at": result.registered_at.isoformat() if result.registered_at else None
+    })
+
+
+@app.delete(f"{API_PREFIX}/participant/{{participant_id}}")
+async def delete_participant(
+    participant_id: str,
+    db: Session = Depends(get_db_session),
+    _user=Depends(get_current_user)
+):
+    """
+    Delete a participant from the per-race table.
+    Only allowed if race status is 'created'.
+    
+    Args:
+        participant_id: Participant ID
+        
+    Returns:
+        Success message
+        
+    Raises:
+        NotFoundError: If participant not found
+        ConflictError: If race is not in 'created' status
+    """
+    # Find participant - need to search all per-race tables
+    races = race_service.list_races(db=db)
+    participant_data = None
+    target_race = None
+    
+    for race in races:
+        table_name = getattr(race, "table_name", None)
+        if not table_name:
+            continue
+            
+        try:
+            query = text(f'SELECT * FROM "{table_name}" WHERE id = :participant_id')
+            result = db.execute(query, {"participant_id": participant_id}).fetchone()
+            if result:
+                participant_data = result
+                target_race = race
+                break
+        except Exception:
+            continue
+    
+    if not participant_data or not target_race:
+        raise NotFoundError("Participant", participant_id)
+    
+    # Check race status - only allow deletion if race is 'created'
+    if getattr(target_race, "status", None) != "created":
+        raise ConflictError(
+            f"Cannot delete participant. Race '{target_race.name}' is {getattr(target_race, 'status', 'unknown')}. "
+            "Participants can only be deleted when race status is 'created'."
+        )
+    
+    # Delete participant
+    table_name = target_race.table_name
+    delete_sql = text(f'DELETE FROM "{table_name}" WHERE id = :participant_id')
+    db.execute(delete_sql, {"participant_id": participant_id})
+    db.commit()
+    
+    return create_success_response({
+        "message": "Participant deleted successfully",
+        "participant_id": participant_id
+    })
+
+
 # ============================================================================
 # RFID HUB ENDPOINTS 
 # ============================================================================
@@ -727,8 +1013,8 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
     Handle start line RFID hit.
     
     Logic:
-    1. If race NOT started: Set status='grace', start_time=null, end_time=null
-    2. If race IS started: 
+    1. If race NOT active: Set status='grace', start_time=null, end_time=null
+    2. If race IS active: 
        - Set status='running'
        - Set start_time to hit timestamp from proxy (RFID hit time)
        - BUT if RFID already exists with start_time, only update if gap > 5s and < 5min
@@ -739,10 +1025,9 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
         hit_timestamp: ISO timestamp from proxy/listener when RFID was detected
     
     Flow:
-    1. Find today's race (scheduled_date = today)
-    2. Check if race status is 'started'
-    3. Find the participant with this RFID
-    4. Apply appropriate logic based on race status
+    1. Find the active race (status = 'active')
+    2. Find the participant with this RFID
+    3. Apply appropriate logic based on race status
     """
     # logger.info(f"[RFID_START] Processing start RFID: {rfid_tag}")
     
@@ -762,26 +1047,20 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
             current_time = get_current_timestamp_utc()
             # logger.debug(f"[RFID_START] No proxy timestamp provided; using backend time: {current_time}")
         
-        # Get today's date in Asia/Kolkata to align with local race scheduling
-        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-        today_str = today.isoformat()
-        # logger.info(f"[RFID_START] Looking for races scheduled for today (Asia/Kolkata): {today_str}")
-        
-        # Find today's race
+        # Find the active race
         query = text("""
             SELECT id, name, table_name, scheduled_date, status 
             FROM races 
-            WHERE DATE(scheduled_date) = :today
-            ORDER BY created_at DESC
+            WHERE status = :status
             LIMIT 1
         """)
-        race_row = db.execute(query, {"today": today}).fetchone()
+        race_row = db.execute(query, {"status": RaceStatus.ACTIVE.value}).fetchone()
         
         if not race_row:
-            logger.warning(f"[RFID_START] No race scheduled for today ({today_str})")
+            logger.warning(f"[RFID_START] No active race found")
             response = RFIDHitResponse(
                 success=False,
-                message="No race scheduled for today",
+                message="No active race found",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -948,7 +1227,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
     
     Logic:
     - Only record end_time if runner status is 'running'
-    - Find the race whose status is 'started'
+    - Find the race whose status is 'active'
     - Skip if runner is not in 'running' status
     
     Args:
@@ -957,7 +1236,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         hit_timestamp: ISO timestamp from proxy/listener when RFID was detected
     
     Flow:
-    1. Find today's race with status='started'
+    1. Find active race (status='active')
     2. Find the participant with this RFID
     3. Check if status is 'running'
     4. If yes: Update end_time and set status to 'completed'
@@ -982,23 +1261,17 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
             current_time = get_current_timestamp_utc()
             logger.debug(f"[RFID_END] No proxy timestamp provided; using backend time: {current_time}")
         
-        # Get today's date in Asia/Kolkata to align with local race scheduling
-        today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-        today_str = today.isoformat()
-        # logger.info(f"[RFID_END] Today's date (Asia/Kolkata): {today_str}")
-        
-        # Find today's race with status='started'
+        # Find the active race
         query = text("""
             SELECT id, name, table_name, scheduled_date, status 
             FROM races 
-            WHERE DATE(scheduled_date) = :today AND status = 'started'
-            ORDER BY created_at DESC
+            WHERE status = :status
             LIMIT 1
         """)
-        race_row = db.execute(query, {"today": today}).fetchone()
+        race_row = db.execute(query, {"status": RaceStatus.ACTIVE.value}).fetchone()
         
         if not race_row:
-            logger.warning(f"[RFID_END] No 'started' race found for today ({today_str})")
+            logger.warning(f"[RFID_END] No active race found")
             response = RFIDHitResponse(
                 success=False,
                 message="No active race found for today",
@@ -1332,7 +1605,7 @@ async def record_rfid_end_from_listener(
 @app.post(f"{API_PREFIX}/races/{{race_id}}/start-group")
 async def start_race_group(
     race_id: str,
-    payload: RaceGroupStartRequest,
+    payload: RaceStartRequest,
     db: Session = Depends(get_db_session),
     _user=Depends(get_current_user)
 ):
@@ -1374,7 +1647,7 @@ async def start_race_group(
         
         # logger.info(f"✓ Updated race {race_id} status to 'started'")
         
-        response = RaceGroupStartResponse(
+        response = RaceStartResponse(
             success=True,
             message=f"Race started, {grace_count} participants assigned start time",
             race_id=race_id,
@@ -1391,10 +1664,10 @@ async def start_race_group(
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"✗ Error starting race group: {e}")
+        logger.error(f"✗ Error starting race: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to start race group"
+            detail="Failed to start race"
         )
 
 
@@ -1425,10 +1698,10 @@ async def get_race_groups(
         return create_success_response(groups)
         
     except Exception as e:
-        logger.error(f"✗ Error fetching race groups: {e}")
+        logger.error(f"✗ Error fetching races: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch race groups"
+            detail="Failed to fetch races"
         )
 
 
@@ -1451,7 +1724,7 @@ async def get_race_group(
         
         if not group:
             raise NotFoundError(
-                "Race Group",
+                "Race",
                 f"Race={race_id}, Group={group_number}"
             )
         

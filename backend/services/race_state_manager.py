@@ -3,7 +3,7 @@ Race State Manager - In-Memory Group Management
 Security Level: Military-grade
 Last Updated: January 24, 2026
 
-Manages race groups and grace periods for RFID timing:
+Manages races and grace periods for RFID timing:
 - Groups: Collections of RFIDs that start together
 - Grace periods: Time windows allowing late arrivals to join started groups
 - Locking: Prevents new RFIDs from joining started groups after grace expires
@@ -21,7 +21,7 @@ logger = logging.getLogger("rfid-marathon.race-state")
 
 class RaceStateManager:
     """
-    Thread-safe in-memory manager for race group state.
+    Thread-safe in-memory manager for race state.
     
     Data structure:
     {

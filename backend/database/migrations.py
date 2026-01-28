@@ -14,7 +14,7 @@ from typing import List, Dict, Any
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from models import Base, User, Race, Participant, AuditLog, NonceCache, EncryptionKey
+from models import Base, User, Race, Participant, NonceCache, EncryptionKey
 from database.connection import get_database_manager
 from basefunctions import DatabaseError, log_security_event, get_current_timestamp_utc
 from constants import AuditAction
@@ -221,13 +221,6 @@ class MigrationManager:
             else:
                 logger.info("✓ No new tables created (all tables already exist)")
             
-            # Log audit entry
-            self._log_migration_audit(
-                action=AuditAction.MIGRATION_EXECUTED.value,
-                success=True,
-                details={"created_tables": list(new_tables)}
-            )
-            
             return {
                 "success": True,
                 "existing_tables_before": list(existing_tables_before),
@@ -238,12 +231,6 @@ class MigrationManager:
             
         except SQLAlchemyError as e:
             logger.error(f"✗ Failed to create tables: {e}")
-            
-            self._log_migration_audit(
-                action=AuditAction.MIGRATION_EXECUTED.value,
-                success=False,
-                details={"error": str(e)}
-            )
             
             raise DatabaseError(
                 message="Failed to create database tables",
@@ -298,7 +285,6 @@ class MigrationManager:
         required_tables = [
             "users",
             "races",
-            "audit_log",
             "nonce_cache",
             "encryption_keys"
         ]
@@ -322,43 +308,7 @@ class MigrationManager:
             "existing_tables": existing_tables,
             "missing_tables": []
         }
-    
-    def _log_migration_audit(
-        self, 
-        action: str, 
-        success: bool, 
-        details: Dict[str, Any]
-    ) -> None:
-        """
-        Log migration execution to audit table (if it exists).
-        
-        Args:
-            action: Migration action
-            success: Whether migration succeeded
-            details: Additional details
-        """
-        # Only log if audit_log table exists
-        if not self.table_exists("audit_log"):
-            return
-        
-        try:
-            with self.db_manager.session_scope() as session:
-                audit_entry = AuditLog(
-                    action=action,
-                    user_id=None,  # System operation
-                    ip_address="127.0.0.1",  # System internal
-                    timestamp=get_current_timestamp_utc(),
-                    request_path="/system/migration",
-                    request_method="SYSTEM",
-                    status_code=200 if success else 500,
-                    details=details,
-                    success=success
-                )
-                session.add(audit_entry)
-                
-        except Exception as e:
-            # Don't fail migration if audit logging fails
-            logger.warning(f"Failed to log migration audit: {e}")
+
     
     def seed_default_data(self) -> None:
         """

@@ -100,7 +100,9 @@ class RaceService:
                 location=location,
                 scheduled_date=scheduled_date,
                 description=description,
-                status=RaceStatus.CREATED.value,
+                # Default newly created races to ACTIVE per new rules. If another
+                # race is active we will resolve that conflict below in the same transaction.
+                status=RaceStatus.ACTIVE.value,
                 created_by=created_by,
                 table_name=table_name,
                 age_upto30_excellent=age_upto30_excellent,
@@ -114,11 +116,21 @@ class RaceService:
                 age_40to45_satisfactory=age_40to45_satisfactory
             )
             
+            # Begin transaction: if another race is active, demote it to CREATED
+            # using a SELECT FOR UPDATE to avoid race conditions.
+            existing_active = db.query(Race).filter_by(status=RaceStatus.ACTIVE.value).with_for_update().first()
+            if existing_active:
+                # If an active race exists and it's not the one we're creating, rollback it to CREATED
+                if str(existing_active.id) != str(deterministic_uuid):
+                    setattr(existing_active, "status", RaceStatus.CREATED.value)
+                    db.add(existing_active)
+
             db.add(race)
+            # Persist both changes in the same transaction
             db.commit()
             db.refresh(race)
-            
-            # Create per-race participant table
+
+            # Create per-race participant table (outside row locking semantics)
             self._create_per_race_participant_table(db, table_name, str(race.id))
             
             logger.info(f"✓ Created race: {race.id} ({name}) - participants table: {table_name}")
@@ -283,10 +295,22 @@ class RaceService:
         
         for field, value in updates.items():
             if field in allowed_fields and value is not None:
+                # Route status changes through the controlled method
+                if field == 'status':
+                    # Prevent manual demotion to 'created' — that is system-only.
+                    if value == RaceStatus.CREATED.value:
+                        raise ValidationError("Cannot set status to 'created' manually. Use the activation flow.")
+
+                    # Use the controlled status updater for other status changes
+                    requested_status = RaceStatus(value)
+                    self.update_race_status(db, race_id, requested_status)
+                    # status handled separately
+                    continue
+
                 # Convert scheduled_date if it's a string
                 if field == 'scheduled_date' and isinstance(value, str):
                     value = iso8601_to_timestamp(value)
-                
+
                 setattr(race, field, value)
         
         race.updated_at = get_current_timestamp_utc()  # type: ignore[assignment]
@@ -301,7 +325,8 @@ class RaceService:
         self,
         db: Session,
         race_id: str,
-        new_status: RaceStatus
+        new_status: RaceStatus,
+        system: bool = False
     ) -> Race:
         """
         Update race status with validation.
@@ -318,32 +343,97 @@ class RaceService:
             ValidationError: If status transition is invalid
         """
         race = self.get_race(db, race_id)
-        
-        # Validate status transitions
+
         current_status = RaceStatus(race.status)
+
+        # Ended is irreversible
+        if current_status == RaceStatus.ENDED:
+            raise ValidationError("Cannot change status of an ended race")
+
+        # Handle activation: created -> active
+        if new_status == RaceStatus.ACTIVE:
+            # If trying to activate a race, demote any existing active race to CREATED
+            # in the same transaction to guarantee at-most-one-active invariant.
+            existing_active = db.query(Race).filter_by(status=RaceStatus.ACTIVE.value).with_for_update().first()
+            if existing_active and str(existing_active.id) != str(race_id):
+                # demote the existing active race to CREATED (system action)
+                setattr(existing_active, "status", RaceStatus.CREATED.value)
+                setattr(existing_active, "updated_at", get_current_timestamp_utc())
+                db.add(existing_active)
+
+            # Now promote the target race to ACTIVE
+            setattr(race, "status", RaceStatus.ACTIVE.value)
+            setattr(race, "updated_at", get_current_timestamp_utc())
+
+            db.commit()
+            db.refresh(race)
+            logger.info(f"✓ Activated race: {race_id} (demoted existing active if present)")
+            return race
+
+        # Handle ending an active race
+        if new_status == RaceStatus.ENDED:
+            if current_status != RaceStatus.ACTIVE and not system:
+                raise ValidationError("Only an active race can be ended")
+
+            setattr(race, "status", RaceStatus.ENDED.value)
+            setattr(race, "updated_at", get_current_timestamp_utc())
+            db.commit()
+            db.refresh(race)
+            logger.info(f"✓ Ended race: {race_id}")
+            return race
+
+        # Handle demotion to CREATED: only allowed for system actions (rollback)
+        if new_status == RaceStatus.CREATED:
+            if not system:
+                raise ValidationError("Setting status to 'created' is a system-only rollback")
+
+            # Only allow if current status is ACTIVE
+            if current_status != RaceStatus.ACTIVE:
+                raise ValidationError("Can only rollback an active race to 'created'")
+
+            setattr(race, "status", RaceStatus.CREATED.value)
+            setattr(race, "updated_at", get_current_timestamp_utc())
+            db.commit()
+            db.refresh(race)
+            logger.info(f"✓ Rolled back race to created: {race_id}")
+            return race
+
+        # All other transitions are invalid
+        raise ValidationError(f"Invalid status transition: {current_status.value} -> {new_status.value}")
+    
+    def delete_race(self, db: Session, race_id: str) -> None:
+        """
+        Delete a race and its participant table.
         
-        # Define valid transitions
-        valid_transitions = {
-            RaceStatus.CREATED: [RaceStatus.REGISTRATION_OPEN, RaceStatus.CANCELLED],
-            RaceStatus.REGISTRATION_OPEN: [RaceStatus.IN_PROGRESS, RaceStatus.CANCELLED],
-            RaceStatus.IN_PROGRESS: [RaceStatus.COMPLETED],
-            RaceStatus.COMPLETED: [],  # Final state
-            RaceStatus.CANCELLED: []  # Final state
-        }
+        Args:
+            db: Database session
+            race_id: Race ID
+            
+        Raises:
+            NotFoundError: If race doesn't exist
+            ConflictError: If race is active
+        """
+        race = self.get_race(db, race_id)
         
-        if new_status not in valid_transitions.get(current_status, []):
-            raise ValidationError(
-                f"Invalid status transition: {current_status.value} -> {new_status.value}"
-            )
+        # Cannot delete active race
+        if RaceStatus(race.status) == RaceStatus.ACTIVE:
+            raise ConflictError("Cannot delete an active race")
         
-        race.status = new_status.value  # type: ignore[assignment]
-        race.updated_at = get_current_timestamp_utc()  # type: ignore[assignment]
+        # Drop the participant table if it exists
+        table_name_value = getattr(race, "table_name", None)
+        table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
         
+        try:
+            db.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+            logger.info(f"Dropped participant table: {table_name}")
+        except Exception as e:
+            logger.warning(f"Could not drop table {table_name}: {e}")
+        
+        # Delete the race record
+        db.delete(race)
         db.commit()
-        db.refresh(race)
         
-        logger.info(f"✓ Updated race status: {race_id} -> {new_status.value}")
-        return race
+        logger.info(f"✓ Deleted race: {race_id}")
     
     def get_race_participant_count(self, db: Session, race_id: str) -> int:
         """

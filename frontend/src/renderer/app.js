@@ -4,11 +4,68 @@ import { showToast } from './utils/Toasts.js';
 import { renderRegistration } from './views/CandidateRegistration.js';
 import { renderDashboard } from './views/Dashboard.js';
 import { renderCreateRace } from './views/CreateRace.js';
-import { renderResults } from './views/Results.js';
-import { renderRaceGroupStart } from './views/RaceGroupStart.js';
+import { renderCandidateManagement } from './views/CandidateManagement.js';
+import { renderScoreboard } from './views/Scoreboard.js';
+import { renderRaceStart } from './views/RaceStart.js';
+import { renderRacesManagement } from './views/RacesManagement.js';
 
 const secureApi = window.secureApi;
 const app = document.getElementById("app");
+
+// ============================================================================
+// GLOBAL LOADER - Prevents duplicate API calls
+// ============================================================================
+class GlobalLoader {
+  constructor() {
+    this.isLoading = false;
+    this.loaderElement = null;
+  }
+
+  show() {
+    if (this.isLoading) return;
+    this.isLoading = true;
+    
+    // Create loader overlay
+    this.loaderElement = document.createElement('div');
+    this.loaderElement.id = 'global-loader';
+    this.loaderElement.innerHTML = `
+      <div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: white; padding: 24px; border-radius: 8px; text-align: center;">
+          <div class="spinner" style="border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+          <p style="margin-top: 12px; color: #374151;">Loading...</p>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(this.loaderElement);
+  }
+
+  hide() {
+    if (!this.isLoading) return;
+    this.isLoading = false;
+    
+    if (this.loaderElement) {
+      this.loaderElement.remove();
+      this.loaderElement = null;
+    }
+  }
+
+  async wrap(asyncFn) {
+    if (this.isLoading) {
+      console.warn('Request blocked: loader already active');
+      return null;
+    }
+    
+    try {
+      this.show();
+      const result = await asyncFn();
+      return result;
+    } finally {
+      this.hide();
+    }
+  }
+}
+
+const globalLoader = new GlobalLoader();
 
 const state = {
   view: "dashboard",
@@ -35,6 +92,13 @@ const state = {
   participants: [],
   selectedRaceFilter: null, // For filtering participants by race
 };
+
+// RFID Deduplication Set - populated on registration page load
+let existingRFIDSet = new Set();
+
+// Candidate Management View state
+let candidateManagementSelectedRaceId = null;
+let scoreboardSelectedRaceId = null;
 
 // Race Start View state
 let raceStartSelectedRaceId = null;
@@ -220,16 +284,131 @@ async function registerRunner(formData) {
   }
 }
 
+// ============================================================================
+// RACE CRUD OPERATIONS
+// ============================================================================
+
+async function createRace(raceData) {
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      await apiRequest("/race", {
+        method: "POST",
+        body: raceData,
+      });
+      
+      showToast("Race created successfully", 'success');
+      await fetchRaces();
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to create race: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
+async function updateRace(raceId, updates) {
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      await apiRequest(`/race/${raceId}`, {
+        method: "PATCH",
+        body: updates,
+      });
+      
+      showToast("Race updated successfully", 'success');
+      await fetchRaces();
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to update race: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
+async function deleteRace(raceId) {
+  if (!confirm('Are you sure you want to delete this race? This action cannot be undone.')) {
+    return;
+  }
+  
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      await apiRequest(`/race/${raceId}`, {
+        method: "DELETE",
+      });
+      
+      showToast("Race deleted successfully", 'success');
+      await fetchRaces();
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to delete race: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
+async function startRace(raceId) {
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      await apiRequest(`/race/${raceId}/start`, {
+        method: "POST",
+      });
+      
+      showToast("Race started successfully", 'success');
+      await fetchRaces();
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to start race: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
+async function endRace(raceId) {
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      await apiRequest(`/race/${raceId}/end`, {
+        method: 'POST'
+      });
+
+      // Refresh races to check transitions
+      await fetchRaces();
+
+      // Sanity check: ensure at most one active race
+      const activeCount = state.races.filter(r => r.status === 'active').length;
+      if (activeCount > 1) {
+        showToast(`Warning: ${activeCount} active races detected`, 'error');
+      } else {
+        showToast('Race ended successfully', 'success');
+      }
+
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to end race: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
 function renderSidebar() {
   return `
     <div class="sidebar">
       <div class="brand">RFID Marathon</div>
       <nav class="sidebar-nav">
           <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
-          <button class="nav-btn ${state.view === "create" ? "active" : ""}" data-view="create">Create Race</button>
-          <button class="nav-btn ${state.view === "race-start" ? "active" : ""}" data-view="race-start">Start Group</button>
+          <button class="nav-btn ${state.view === "races-management" ? "active" : ""}" data-view="races-management">Races Management</button>
+          <button class="nav-btn ${state.view === "race-start" ? "active" : ""}" data-view="race-start">Start Race</button>
           <button class="nav-btn ${state.view === "register" ? "active" : ""}" data-view="register">Register</button>
-          <button class="nav-btn ${state.view === "results" ? "active" : ""}" data-view="results">Data View</button>
+          <button class="nav-btn ${state.view === "candidate-management" ? "active" : ""}" data-view="candidate-management">Candidate Management</button>
+          <button class="nav-btn ${state.view === "scoreboard" ? "active" : ""}" data-view="scoreboard">Scoreboard</button>
       </nav>
       <div class="sidebar-meta">
         <div>API: ${state.config.apiBaseUrl}</div>
@@ -261,10 +440,18 @@ function renderRegister() {
   return renderRegistration(state.registrationStep, state.scannedRFID, state.races, state.selectedRace, state.dashboardData.todayRegistrations);
 }
 
-function render() {
+async function render() {
   // Cleanup polling when leaving race-start view
+  // Inside document.querySelectorAll(".nav-btn").forEach((btn) => { ... })
   if (state.view !== "race-start" && raceStartPollingInterval) {
     stopRaceDataPolling();
+  }
+  
+  // Cleanup RFID listener when leaving registration view
+  if (state.view !== "register" && state.rfidListenerActive) {
+    stopRFIDListener();
+    // Clear existingRFIDSet when leaving registration page
+    existingRFIDSet.clear();
   }
   
   const htmlContent = `
@@ -273,10 +460,12 @@ function render() {
       <div class="main">
         ${renderHeader()}
         ${state.view === "dashboard" ? renderDashboard(state.races, state.dashboardData.todayRegistrations, state.dashboardData.totalParticipants, state.dashboardData.startedToday, state.dashboardData.finishedToday, state.dashboardData.raceStats) : ""}
+        ${state.view === "races-management" ? renderRacesManagement(state.races) : ""}
         ${state.view === "create" ? renderCreateRace() : ""}
-        ${state.view === "race-start" ? renderRaceGroupStart() : ""}
+        ${state.view === "race-start" ? renderRaceStart(state.races, raceStartSelectedRaceId) : ""}
         ${state.view === "register" ? renderRegister() : ""}
-        ${state.view === "results" ? renderResults(state.races, state.participants, state.selectedRaceFilter) : ""}
+        ${state.view === "candidate-management" ? renderCandidateManagement(state.races, state.participants, candidateManagementSelectedRaceId) : ""}
+        ${state.view === "scoreboard" ? renderScoreboard(state.races, state.participants, scoreboardSelectedRaceId) : ""}
       </div>
     </div>
   `;
@@ -294,6 +483,19 @@ function render() {
         state.registrationStep = 1;
         state.scannedRfid = null;
         state.selectedRace = null;
+        // Fetch all participants and populate existingRFIDSet
+        await fetchRaces();
+        await fetchParticipants();
+        existingRFIDSet.clear();
+        state.participants.forEach(p => {
+          const rfid = (p.rfid || p.rfid_tag || '').toUpperCase();
+          if (rfid) existingRFIDSet.add(rfid);
+        });
+      }
+      if (newView === 'race-start') {
+        // Clear previous selection so user must select a race manually
+        raceStartSelectedRaceId = null; 
+        await fetchRaces();
       }
 
       // When opening dashboard, refresh data from backend first
@@ -302,10 +504,16 @@ function render() {
         await fetchDashboardData();
       }
 
-      // When opening results/data view, fetch participants
-      if (newView === 'results') {
+      // When opening candidate management view, fetch participants
+      if (newView === 'candidate-management') {
         await fetchRaces();
-        await fetchParticipants(state.selectedRaceFilter);
+        await fetchParticipants(candidateManagementSelectedRaceId);
+      }
+
+      // When opening scoreboard view, fetch participants
+      if (newView === 'scoreboard') {
+        await fetchRaces();
+        await fetchParticipants(scoreboardSelectedRaceId);
       }
 
       state.view = newView;
@@ -318,12 +526,23 @@ function render() {
     refreshBtn.addEventListener("click", async () => {
       await fetchRaces();
       await fetchDashboardData();
-      if (state.view === 'results') {
-        await fetchParticipants(state.selectedRaceFilter);
+      if (state.view === 'candidate-management') {
+        await fetchParticipants(candidateManagementSelectedRaceId);
+      }
+      if (state.view === 'scoreboard') {
+        await fetchParticipants(scoreboardSelectedRaceId);
       }
       render();
     });
   }
+
+  // Candidate Management view handlers
+  attachCandidateManagementHandlers();
+  // Attach modal controls if the modal exists
+  attachCandidateModalControls();
+  
+  // Scoreboard view handlers
+  attachScoreboardHandlers();
 
   // Results view: Race filter dropdown handler
   const raceFilterDropdown = document.getElementById("race-filter-dropdown");
@@ -347,6 +566,9 @@ function render() {
       render();
     });
   }
+
+  // Registration wizard handlers
+  attachRegistrationWizardHandlers();
 
   // Step 1: Continue to step 2 (after selecting race)
   const continueToStep2Btn = document.getElementById("continue-to-step2");
@@ -603,10 +825,126 @@ function render() {
     });
   }
 
-  // Race Group Start view: Polling-powered live RFID handler
+  // ============================================================================
+  // RACES MANAGEMENT VIEW EVENT LISTENERS
+  // ============================================================================
+  
+  if (state.view === "races-management") {
+    // Create New Race Button — navigate to full Create Race page
+    const createNewRaceBtn = document.getElementById("create-new-race-btn");
+    if (createNewRaceBtn) {
+      createNewRaceBtn.addEventListener("click", async () => {
+        // Switch to the dedicated Create Race view instead of opening the modal
+        state.view = 'create';
+        // clear any modal state
+        state.showRaceModal = false;
+        // ensure races and related data are current
+        await fetchRaces();
+        render();
+      });
+    }
+
+    // Close Modal
+    const closeRaceModal = document.getElementById("close-race-modal");
+    if (closeRaceModal) {
+      closeRaceModal.addEventListener("click", () => {
+        document.getElementById("race-modal").style.display = "none";
+      });
+    }
+
+    // Cancel Form
+    const cancelRaceForm = document.getElementById("cancel-race-form");
+    if (cancelRaceForm) {
+      cancelRaceForm.addEventListener("click", () => {
+        document.getElementById("race-modal").style.display = "none";
+      });
+    }
+
+    // Race Form Submit
+    const raceForm = document.getElementById("race-form");
+    if (raceForm) {
+      raceForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        
+        const raceId = document.getElementById("race-id").value;
+        const formData = {
+          name: document.getElementById("race-name").value,
+          distance_meters: Number(document.getElementById("race-distance").value),
+          location: document.getElementById("race-location").value,
+          scheduled_date: document.getElementById("race-scheduled-date").value,
+          description: document.getElementById("race-description").value || undefined,
+        };
+
+        try {
+          if (raceId) {
+            // Update existing race
+            await updateRace(raceId, formData);
+          } else {
+            // Create new race
+            await createRace(formData);
+          }
+          
+          document.getElementById("race-modal").style.display = "none";
+        } catch (err) {
+          console.error("Form submission error:", err);
+        }
+      });
+    }
+
+    // Edit Race Buttons
+    document.querySelectorAll(".edit-race-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const raceId = btn.dataset.raceId;
+        const race = state.races.find(r => r.id === raceId);
+        
+        if (race) {
+          const modal = document.getElementById("race-modal");
+          const modalTitle = document.getElementById("modal-title");
+          
+          modalTitle.textContent = "Edit Race";
+          document.getElementById("race-id").value = race.id;
+          document.getElementById("race-name").value = race.name;
+          document.getElementById("race-distance").value = race.distance_meters;
+          document.getElementById("race-location").value = race.location;
+          document.getElementById("race-scheduled-date").value = race.scheduled_date.split('T')[0];
+          document.getElementById("race-description").value = race.description || "";
+          
+          modal.style.display = "flex";
+        }
+      });
+    });
+
+    // Delete Race Buttons
+    document.querySelectorAll(".delete-race-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const raceId = btn.dataset.raceId;
+        await deleteRace(raceId);
+      });
+    });
+  }
+
+  // Race Start view: Polling-powered live RFID handler
   if (state.view === "race-start") {
     loadRaceStartRaces();
     startRaceDataPolling(); // Start polling for live updates
+    // Attach End Race button handler
+    const endRaceBtn = document.getElementById('end-race-btn');
+    if (endRaceBtn) {
+      endRaceBtn.addEventListener('click', async () => {
+        if (!raceStartSelectedRaceId) {
+          showRaceStartStatusMessage('Please select a race first', 'warning');
+          return;
+        }
+
+        if (!confirm('Are you sure you want to end this race? This is irreversible.')) return;
+
+        try {
+          await endRace(raceStartSelectedRaceId);
+        } catch (e) {
+          console.error('Failed to end race:', e);
+        }
+      });
+    }
     
     const raceSelect = document.getElementById('race-select');
     if (raceSelect) raceSelect.addEventListener('change', handleRaceStartRaceChange);
@@ -691,6 +1029,308 @@ function render() {
   }
 }
 
+// ============================================================================
+// REGISTRATION WIZARD HANDLERS
+// ============================================================================
+
+function attachRegistrationWizardHandlers() {
+  if (state.view !== 'register') return;
+
+  // Step 1: Race Selection
+  const continueStep1 = document.getElementById('continue-step1');
+  if (continueStep1) {
+    continueStep1.addEventListener('click', () => {
+      const raceSelect = document.getElementById('race-select-dropdown');
+      if (raceSelect && raceSelect.value) {
+        state.selectedRace = raceSelect.value;
+        state.registrationStep = 2;
+        render();
+      } else {
+        showToast('Please select a race to continue', 'warning');
+      }
+    });
+  }
+
+  // Step 1-3: Close buttons (go to dashboard)
+  ['close-step-1', 'close-step-2', 'close-step-3'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        stopRFIDListener();
+        state.registrationStep = 1;
+        state.scannedRFID = null;
+        state.selectedRace = null;
+        await fetchRaces();
+        await fetchDashboardData();
+        state.view = 'dashboard';
+        render();
+      });
+    }
+  });
+
+  // Step 2: Back to step 1
+  const backToStep1 = document.getElementById('back-to-step-1');
+  if (backToStep1) {
+    backToStep1.addEventListener('click', () => {
+      stopRFIDListener();
+      state.registrationStep = 1;
+      state.scannedRFID = null;
+      render();
+    });
+  }
+
+  // Step 3: Back to step 2
+  const backToStep2 = document.getElementById('back-to-step-2');
+  if (backToStep2) {
+    backToStep2.addEventListener('click', () => {
+      state.registrationStep = 2;
+      render();
+      startRFIDListener();
+    });
+  }
+
+  // Step 3: Registration form
+  const registrationForm = document.getElementById('registration-form');
+  if (registrationForm) {
+    registrationForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await submitRegistration();
+    });
+  }
+
+  // Start RFID listener if on step 2
+  if (state.registrationStep === 2) {
+    startRFIDListener();
+  } else {
+    stopRFIDListener();
+  }
+}
+
+// ============================================================================
+// CANDIDATE MANAGEMENT VIEW HANDLERS
+// ============================================================================
+
+function attachCandidateManagementHandlers() {
+  if (state.view !== 'candidate-management') return;
+
+  // Race filter dropdown
+  const raceFilterDropdown = document.getElementById('candidate-race-filter-dropdown');
+  if (raceFilterDropdown) {
+    raceFilterDropdown.addEventListener('change', async (e) => {
+      candidateManagementSelectedRaceId = e.target.value || null;
+      await fetchParticipants(candidateManagementSelectedRaceId);
+      render();
+    });
+  }
+
+  // Create New Candidate Button
+  const createNewCandidateBtn = document.getElementById('create-new-candidate-btn');
+  if (createNewCandidateBtn) {
+    createNewCandidateBtn.addEventListener('click', async () => {
+      // Open the registration view instead of an in-place modal
+      state.registrationStep = 1;
+      state.scannedRFID = null;
+      // If a race filter is selected, preselect it in the registration flow
+      state.selectedRace = candidateManagementSelectedRaceId || null;
+      // Ensure races are loaded for the registration page
+      await fetchRaces();
+      state.view = 'register';
+      render();
+    });
+  }
+
+  // Edit Candidate Buttons: navigate to registration view for edits
+  const editCandidateBtns = document.querySelectorAll('.edit-candidate-btn');
+  editCandidateBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const candidateId = btn.dataset.candidateId;
+      const participant = state.participants.find(p => p.id === candidateId);
+      if (!participant) {
+        showToast('Candidate not found', 'error');
+        return;
+      }
+
+      // Open edit modal and populate fields
+      const modal = document.getElementById('candidate-modal');
+      const modalTitle = document.getElementById('candidate-modal-title');
+      modalTitle.textContent = 'Edit Candidate';
+      document.getElementById('candidate-id').value = candidateId;
+      document.getElementById('candidate-race-id').value = participant.race_id;
+
+      // Decrypt name if needed (leave as encrypted fallback)
+      let decryptedName = participant.encrypted_name || participant.name;
+      if (participant.encryption_key && decryptedName) {
+        try {
+          const dec = await window.electronAPI.decryptFernet(decryptedName, participant.encryption_key);
+          decryptedName = dec;
+        } catch (err) {
+          console.error('Failed to decrypt name:', err);
+        }
+      }
+
+      document.getElementById('candidate-name').value = decryptedName || '';
+      document.getElementById('candidate-rfid').value = participant.rfid_tag || participant.rfid || '';
+      document.getElementById('candidate-age').value = participant.age || '';
+      document.getElementById('candidate-gender').value = participant.gender || '';
+
+      // Disable RFID and race selection on edit to avoid moving between per-race tables
+      const rfidEl = document.getElementById('candidate-rfid');
+      if (rfidEl) { rfidEl.disabled = true; }
+      const raceEl = document.getElementById('candidate-race-id');
+      if (raceEl) { raceEl.disabled = true; }
+
+      modal.style.display = 'flex';
+    });
+  });
+
+  // Delete Candidate Buttons
+  const deleteCandidateBtns = document.querySelectorAll('.delete-candidate-btn');
+  deleteCandidateBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const candidateId = btn.dataset.candidateId;
+      await deleteCandidate(candidateId);
+    });
+  });
+
+  // Note: Modal-based create/edit has been replaced by the registration page.
+  // Candidate creation and editing now use the dedicated registration flow.
+}
+
+// Re-attach modal controls for CandidateManagement (close/cancel/submit)
+function attachCandidateModalControls() {
+  const closeCandidateModal = document.getElementById('close-candidate-modal');
+  if (closeCandidateModal) {
+    closeCandidateModal.addEventListener('click', () => {
+      const modal = document.getElementById('candidate-modal');
+      if (modal) modal.style.display = 'none';
+    });
+  }
+
+  const cancelCandidateForm = document.getElementById('cancel-candidate-form');
+  if (cancelCandidateForm) {
+    cancelCandidateForm.addEventListener('click', () => {
+      const modal = document.getElementById('candidate-modal');
+      if (modal) modal.style.display = 'none';
+    });
+  }
+
+  const candidateForm = document.getElementById('candidate-form');
+  if (candidateForm) {
+    candidateForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const candidateId = document.getElementById('candidate-id').value;
+      const nameVal = document.getElementById('candidate-name').value;
+      const ageVal = Number(document.getElementById('candidate-age').value) || null;
+      const genderVal = document.getElementById('candidate-gender').value;
+
+      try {
+        if (candidateId) {
+          const updates = { name: nameVal, age: ageVal, gender: genderVal };
+          await updateCandidate(candidateId, updates);
+        }
+        const modal = document.getElementById('candidate-modal');
+        if (modal) modal.style.display = 'none';
+      } catch (err) {
+        // Errors handled by updateCandidate
+      }
+    });
+  }
+}
+
+// ============================================================================
+// SCOREBOARD VIEW HANDLERS
+// ============================================================================
+
+function attachScoreboardHandlers() {
+  if (state.view !== 'scoreboard') return;
+
+  // Race filter dropdown (only ended races)
+  const scoreboardRaceFilterDropdown = document.getElementById('scoreboard-race-filter-dropdown');
+  if (scoreboardRaceFilterDropdown) {
+    scoreboardRaceFilterDropdown.addEventListener('change', async (e) => {
+      scoreboardSelectedRaceId = e.target.value || null;
+      await fetchParticipants(scoreboardSelectedRaceId);
+      render();
+    });
+  }
+
+  // Export Scoreboard Button (future feature)
+  const exportScoreboardBtn = document.getElementById('export-scoreboard-btn');
+  if (exportScoreboardBtn) {
+    exportScoreboardBtn.addEventListener('click', () => {
+      showToast('Export feature coming soon', 'info');
+    });
+  }
+}
+
+// ============================================================================
+// CANDIDATE CRUD OPERATIONS (Using existing /participant/register endpoint)
+// ============================================================================
+
+async function createCandidate(candidateData) {
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      // Use existing /participant/register endpoint
+      await apiRequest('/participant/register', {
+        method: 'POST',
+        body: candidateData,
+      });
+      
+      showToast('Candidate created successfully', 'success');
+      await fetchParticipants(candidateManagementSelectedRaceId);
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to create candidate: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
+async function updateCandidate(candidateId, updates) {
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      await apiRequest(`/participant/${candidateId}`, {
+        method: 'PATCH',
+        body: updates,
+      });
+      
+      showToast('Candidate updated successfully', 'success');
+      await fetchParticipants(candidateManagementSelectedRaceId);
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to update candidate: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
+async function deleteCandidate(candidateId) {
+  if (!confirm('Are you sure you want to delete this candidate? This action cannot be undone.')) {
+    return;
+  }
+  
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      await apiRequest(`/participant/${candidateId}`, {
+        method: 'DELETE',
+      });
+      
+      showToast('Candidate deleted successfully', 'success');
+      await fetchParticipants(candidateManagementSelectedRaceId);
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to delete candidate: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
 async function bootstrap() {
   try {
     await ensureAuth();
@@ -735,6 +1375,22 @@ function goToRegistrationStep3() {
     showToast('Please scan an RFID tag first', 'warning');
     return;
   }
+  
+  // Check if RFID already exists in existingRFIDSet
+  const rfidUpper = state.scannedRFID.toUpperCase();
+  if (existingRFIDSet.has(rfidUpper)) {
+    showToast('This RFID tag is already registered. Please use a different RFID tag.', 'error');
+    // Clear the scanned RFID and stay on step 2
+    state.scannedRFID = null;
+    const rfidDisplay = document.getElementById('rfid-display');
+    if (rfidDisplay) {
+      rfidDisplay.textContent = 'Duplicate RFID - Please scan again';
+      rfidDisplay.style.borderColor = '#ef4444';
+      rfidDisplay.style.color = '#ef4444';
+    }
+    return;
+  }
+  
   state.registrationStep = 3;
   stopRFIDListener();
   render();
@@ -838,6 +1494,10 @@ async function submitRegistration() {
 
     const data = await response.json();
     if (data.success) {
+      // Add RFID to existingRFIDSet to prevent duplicate registration in same session
+      const rfidUpper = rfid.toUpperCase();
+      existingRFIDSet.add(rfidUpper);
+      
       document.getElementById('registration-form').reset();
       
       const timestamp = new Date().toLocaleTimeString();
@@ -1031,7 +1691,6 @@ function updateRaceStartWSStatus(connected, status) {
 
 async function loadRaceStartRaces() {
   try {
-    // Reuse authenticated API helper so file:// protocol does not break relative URLs
     await ensureAuth();
     const races = await apiRequest('/race');
 
@@ -1045,6 +1704,10 @@ async function loadRaceStartRaces() {
         const option = document.createElement('option');
         option.value = race.id;
         option.textContent = race.name;
+        // Only set selected if it matches the current state
+        if (race.id === raceStartSelectedRaceId) {
+            option.selected = true;
+        }
         raceSelect.appendChild(option);
       });
     }
@@ -1055,9 +1718,22 @@ async function loadRaceStartRaces() {
 }
 
 function handleRaceStartRaceChange(event) {
-  raceStartSelectedRaceId = event.target.value;
-  const groupInfoEl = document.getElementById('group-info');
-  if (groupInfoEl) groupInfoEl.textContent = 'Group 1 (default)';
+  const newId = event.target.value;
+  
+  if (!newId) {
+    raceStartSelectedRaceId = null;
+    stopRaceDataPolling();
+    render();
+    return;
+  }
+
+  raceStartSelectedRaceId = newId;
+  
+  // Re-render to update UI panels/buttons
+  render();
+  
+  // Start polling now that a race is explicitly selected
+  startRaceDataPolling();
 }
 
 async function handleRaceStartSubmit(event) {
@@ -1068,33 +1744,31 @@ async function handleRaceStartSubmit(event) {
     return;
   }
   
-  try {
-    await ensureAuth();
-    
-    // Call backend API to start the race group
-    const data = await apiRequest(`/races/${raceStartSelectedRaceId}/start-group`, {
-      method: 'POST',
-      body: {
-        race_id: raceStartSelectedRaceId,
-        group_number: raceStartSelectedGroupNumber
-      }
-    });
-    
-    if (data.success) {
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      
+      // Call backend API to start the race
+      await apiRequest(`/race/${raceStartSelectedRaceId}/start`, {
+        method: 'POST'
+      });
+      
       raceStartTime = new Date();
-      showToast(`✓ Started Group ${data.group_number} - ${data.rfids_started} runners in grace period (2 min)`, 'success');
-      const startBtn = document.getElementById('start-group-btn');
-      if (startBtn) startBtn.disabled = true;
+      showToast('✓ Race started successfully', 'success');
+      
+      // Refresh races and re-render to update button state
+      await fetchRaces();
+      render();
+      
       // Refresh data to show updated times and status
       await refreshRaceStartData();
-    } else {
-      showRaceStartStatusMessage(`Failed to start group: ${data.message}`, 'error');
+    } catch (e) {
+      console.error('Failed to start race:', e);
+      showRaceStartStatusMessage(`Failed to start race: ${e.message}`, 'error');
     }
-  } catch (e) {
-    console.error('Failed to start group:', e);
-    showRaceStartStatusMessage(`Failed to start group: ${e.message}`, 'error');
-  }
+  });
 }
+
 
 async function refreshRaceStartData() {
   if (!raceStartSelectedRaceId) {
