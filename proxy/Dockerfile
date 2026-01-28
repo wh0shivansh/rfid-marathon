@@ -3,7 +3,7 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Install minimal runtime dependencies used by the proxy
-RUN pip install --no-cache-dir fastapi uvicorn httpx python-dotenv
+RUN pip install --no-cache-dir fastapi uvicorn httpx python-dotenv tzdata
 
 # Copy proxy source (copy the entire build context)
 COPY . /app/

@@ -1,8 +1,7 @@
 services:
-  backend:
+  rfid:
     build:
       context: ./backend
-    network_mode: host
     container_name: rfid-backend
     dns:
       - 8.8.8.8
@@ -11,6 +10,10 @@ services:
       - PYTHONUNBUFFERED=1
     env_file:
       - backend/.env
+    expose:
+      - 8001
+    networks:
+      - rfid-net
 
   proxy:
     build:
@@ -20,12 +23,12 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
-    ports:
-      - "9090:9090"
     depends_on:
-      - backend
+      - rfid
     env_file:
       - proxy/.env
+    expose:
+      - 9090
     networks:
       - rfid-net
 
