@@ -533,7 +533,18 @@ function render() {
       e.preventDefault();
       const formData = Object.fromEntries(new FormData(createForm).entries());
       // Convert scheduled_date (YYYY-MM-DD) to ISO +00:00
-      const isoDate = new Date(formData.schedule_date).toISOString().replace('Z', '+00:00');
+      // The form field is named `scheduled_date` in the CreateRace view; accept either key for safety.
+      const rawDate = formData.scheduled_date || formData.schedule_date;
+      if (!rawDate) {
+        showToast('Please provide a scheduled date', 'warning');
+        return;
+      }
+      const parsedDate = new Date(rawDate);
+      if (Number.isNaN(parsedDate.getTime())) {
+        showToast('Invalid scheduled date format', 'error');
+        return;
+      }
+      const isoDate = parsedDate.toISOString().replace('Z', '+00:00');
       
       // Get selected time unit and convert to seconds
       const timeUnit = document.getElementById('time-unit-selector')?.value || 'minutes';
