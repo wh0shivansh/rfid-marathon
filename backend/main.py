@@ -1500,3 +1500,8 @@ async def not_found_handler(_request: Request, _exc):
 @app.get("/")
 async def root():
     return create_success_response({"message": "RFID Marathon Management System API"})
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
