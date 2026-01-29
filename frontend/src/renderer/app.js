@@ -386,13 +386,33 @@ async function endRace(raceId) {
       if (activeCount > 1) {
         showToast(`Warning: ${activeCount} active races detected`, 'error');
       } else {
-        showToast('Race ended successfully', 'success');
+        showToast('Race completed successfully', 'success');
       }
 
       render();
     } catch (err) {
       console.error(err);
       showToast(`Failed to end race: ${err.message}`, 'error');
+      throw err;
+    }
+  });
+}
+
+async function updateRaceStatus(raceId, status) {
+  return await globalLoader.wrap(async () => {
+    try {
+      await ensureAuth();
+      await apiRequest(`/race/${raceId}/status/update`, {
+        method: 'POST',
+        body: { status }
+      });
+
+      showToast(`Race status updated to ${status}`, 'success');
+      await fetchRaces();
+      render();
+    } catch (err) {
+      console.error(err);
+      showToast(`Failed to update race status: ${err.message}`, 'error');
       throw err;
     }
   });
@@ -921,6 +941,29 @@ async function render() {
         await deleteRace(raceId);
       });
     });
+
+    // Toggle Active/Created Buttons (Activate / Deactivate)
+    document.querySelectorAll(".toggle-active-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const raceId = btn.dataset.raceId;
+        const race = state.races.find(r => r.id === raceId);
+        if (!race) return;
+
+        try {
+          if (race.status === 'active') {
+            // Deactivate -> set to 'created' via backend system action
+            if (!confirm('Deactivate this race (set status to created)?')) return;
+            await updateRaceStatus(raceId, 'created');
+          } else {
+            // Activate -> set to 'active' (this will demote any existing active race)
+            if (!confirm('Activate this race (this will demote any existing active race)?')) return;
+            await updateRaceStatus(raceId, 'active');
+          }
+        } catch (err) {
+          console.error('Toggle active error:', err);
+        }
+      });
+    });
   }
 
   // Race Start view: Polling-powered live RFID handler
@@ -949,7 +992,7 @@ async function render() {
     const raceSelect = document.getElementById('race-select');
     if (raceSelect) raceSelect.addEventListener('change', handleRaceStartRaceChange);
     
-    const startForm = document.getElementById('start-group-form');
+    const startForm = document.getElementById('start-race-form');
     if (startForm) startForm.addEventListener('submit', handleRaceStartSubmit);
     
     const refreshBtn = document.getElementById('refresh-btn');
@@ -1244,7 +1287,7 @@ function attachCandidateModalControls() {
 function attachScoreboardHandlers() {
   if (state.view !== 'scoreboard') return;
 
-  // Race filter dropdown (only ended races)
+  // Race filter dropdown (only completed races)
   const scoreboardRaceFilterDropdown = document.getElementById('scoreboard-race-filter-dropdown');
   if (scoreboardRaceFilterDropdown) {
     scoreboardRaceFilterDropdown.addEventListener('change', async (e) => {

@@ -1,10 +1,10 @@
 // Scoreboard View - HTML Only
 // All JavaScript logic is in app.js
-// Shows only ENDED races with participant time calculations
+// Shows only COMPLETED races with participant time calculations
 
 export function renderScoreboard(races = [], participants = [], selectedRaceId = null) {
-  // Filter only ended races
-  const endedRaces = races.filter(r => r.status === 'ended');
+  // Filter only completed races
+  const completedRaces = races.filter(r => r.status === 'completed');
   
   // Filter participants for selected race
   const filteredParticipants = selectedRaceId
@@ -60,7 +60,7 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
           <h1 style="color: #e2e8f0; margin: 0; font-size: 24px; font-weight: 600;">🏆 Scoreboard</h1>
           <select id="scoreboard-race-filter-dropdown" style="padding: 10px 14px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.95em; cursor: pointer; min-width: 300px;">
             <option value="">-- Select a completed race --</option>
-            ${endedRaces.map(race => `
+            ${completedRaces.map(race => `
               <option value="${race.id}" ${String(selectedRaceId) === String(race.id) ? 'selected' : ''}>
                 ${race.name} - ${race.location} (${new Date(race.scheduled_date).toLocaleDateString()})
               </option>
@@ -78,7 +78,7 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
         <div class="empty-state" style="text-align: center; padding: 60px; background: #111827; border-radius: 8px; border: 1px solid #1f2937;">
           <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;">🏁</div>
           <p style="color: #64748b; font-size: 16px;">Select a completed race to view the scoreboard.</p>
-          ${endedRaces.length === 0 ? `
+          ${completedRaces.length === 0 ? `
             <p style="color: #64748b; font-size: 14px; margin-top: 8px;">No completed races available yet.</p>
           ` : ''}
         </div>

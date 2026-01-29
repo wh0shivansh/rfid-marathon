@@ -16,14 +16,24 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
   let buttonDisabled = false;
   let buttonColor = '#10b981';
   
+  // Determine End Race button color
+  let endRaceButtonColor = '#ef4444';  // Red when enabled
+  
   if (raceStatus === 'active') {
     buttonText = 'Started';
     buttonDisabled = true;
     buttonColor = '#6b7280';
-  } else if (raceStatus === 'ended') {
-    buttonText = 'Ended';
+  } else if (raceStatus === 'completed') {
+    buttonText = 'Completed';
     buttonDisabled = true;
     buttonColor = '#6b7280';
+    endRaceButtonColor = '#6b7280';  // Gray when completed
+  }
+  
+  // End Race button is disabled if not in an active state that allows completion
+  const endRaceDisabled = !['created', 'active', 'started'].includes(raceStatus);
+  if (endRaceDisabled) {
+    endRaceButtonColor = '#6b7280';  // Gray when disabled
   }
   
   return `
@@ -56,7 +66,7 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
         <div class="panel-header">Start Race</div>
         
         
-        <form id="start-group-form" class="form-grid">
+        <form id="start-race-form" class="form-grid">
           <!-- Race Selection -->
           <label for="race-select">
             Race *
@@ -80,17 +90,21 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
           </div>
           
           <!-- Action Buttons -->
+          ${selectedRaceId ? `
           <div class="form-actions" style="grid-column: 1 / -1; display: flex; gap: 8px;">
-            <button type="submit" id="start-group-btn" style="flex: 1; background: ${buttonColor};" ${buttonDisabled ? 'disabled' : ''}>
+            <button type="submit" id="start-race-btn" style="flex: 1; background: ${buttonColor};" ${buttonDisabled ? 'disabled' : ''}>
               ${buttonText}
             </button>
-            <button type="button" id="end-race-btn" style="flex: 1; background: #ef4444;" ${raceStatus === 'active' ? '' : 'disabled'}>
+            ${raceStatus !== 'completed' ? `
+            <button type="button" id="end-race-btn" style="flex: 1; background: ${endRaceButtonColor};" ${endRaceDisabled ? 'disabled' : ''}>
               End Race
             </button>
+            ` : ''}
             <button type="button" id="refresh-btn" style="flex: 1; background: #0ea5e9;">
               Refresh
             </button>
           </div>
+          ` : ``}
         </form>
       </div>
       

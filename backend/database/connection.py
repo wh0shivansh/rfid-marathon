@@ -155,11 +155,17 @@ class DatabaseManager:
 
             cursor = dbapi_connection.cursor()
 
-            # Verify SSL is enabled
-            cursor.execute("SHOW ssl;")
-            ssl_status = cursor.fetchone()[0]
+            # Skip SSL verification when explicitly disabled (local dev)
+            if DB_SSL_MODE.lower() == "disable":
+                logger.debug("DB_SSL_MODE=disable; skipping SSL enforcement check")
+                cursor.close()
+                return
 
-            cursor.close()
+            try:
+                cursor.execute("SHOW ssl;")
+                ssl_status = cursor.fetchone()[0]
+            finally:
+                cursor.close()
 
             if ssl_status != "on":
                 log_security_event(

@@ -97,7 +97,7 @@ export function renderRacesManagement(races = []) {
               <div style="position: absolute; top: 12px; right: 12px;">
                 <span class="status-badge ${
                   race.status === 'active' ? 'status-badge-active' : 
-                  race.status === 'ended' ? 'status-badge-ended' : 
+                  race.status === 'completed' ? 'status-badge-completed' : 
                   'status-badge-created'
                 }" style="padding: 6px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
                   ${race.status || 'created'}
@@ -131,6 +131,12 @@ export function renderRacesManagement(races = []) {
               <!-- Action Buttons -->
               <div style="display: flex; gap: 8px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #1f2937;">
                 <button class="dark-btn-edit edit-race-btn" data-race-id="${race.id}" style="flex: 1; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;">Edit</button>
+
+                <!-- Toggle Active/Created Button -->
+                <button class="dark-btn-secondary toggle-active-btn" data-race-id="${race.id}" style="flex: 1; padding: 10px; background: ${race.status === 'active' ? '#f97316' : '#10b981'}; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;">
+                  ${race.status === 'active' ? 'Deactivate' : 'Activate'}
+                </button>
+
                 <button class="dark-btn-danger delete-race-btn" data-race-id="${race.id}" ${race.status === 'active' ? 'disabled' : ''} style="flex: 1; padding: 10px; background: ${race.status === 'active' ? '#6b7280' : '#ef4444'}; color: white; border: none; border-radius: 4px; cursor: ${race.status === 'active' ? 'not-allowed' : 'pointer'}; font-size: 14px; font-weight: 500; transition: all 0.2s; opacity: ${race.status === 'active' ? '0.5' : '1'};">Delete</button>
               </div>
             </div>

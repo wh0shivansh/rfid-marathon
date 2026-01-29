@@ -14,7 +14,7 @@ from typing import List, Dict, Any
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from models import Base, User, Race, Participant, NonceCache, EncryptionKey
+from models import Base, User, NonceCache
 from database.connection import get_database_manager
 from basefunctions import DatabaseError, log_security_event, get_current_timestamp_utc
 from constants import AuditAction
@@ -475,6 +475,49 @@ class MigrationManager:
                 "error": str(e)
             }
 
+    def update_race_status_constraint(self) -> Dict[str, Any]:
+        """
+        Update the race status check constraint to allow all valid status values.
+        This is idempotent and safe to run multiple times.
+        """
+        logger.info("Updating race status constraint...")
+
+        try:
+            session = self.db_manager.get_session()
+
+            if not self.table_exists("races"):
+                logger.info("Races table does not exist, skipping status constraint update")
+                return {"success": True, "skipped": True}
+
+            # Drop old constraint if it exists and create new one allowing all statuses
+            session.execute(text("""
+                ALTER TABLE races
+                DROP CONSTRAINT IF EXISTS check_race_status;
+            """))
+
+            session.execute(text("""
+                ALTER TABLE races
+                ADD CONSTRAINT check_race_status
+                CHECK (status IN ('created', 'active', 'started', 'completed'));
+            """))
+
+            session.commit()
+            session.close()
+
+            logger.info("✓ Updated race status constraint to allow all valid statuses")
+
+            return {
+                "success": True,
+                "constraint_updated": "check_race_status"
+            }
+
+        except Exception as e:
+            logger.error(f"✗ Failed to update race status constraint: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     def cleanup_expired_nonces(self) -> int:
         """
         Clean up expired nonces from the cache.
@@ -534,26 +577,29 @@ def run_migrations() -> Dict[str, Any]:
         # Step 3: Update constraints
         logger.info("\n[3/9] Updating database constraints...")
         results["constraints"] = migration_manager.update_race_distance_constraint()
+        # Step 4: Update race status constraint to include all valid statuses
+        logger.info("\n[4/9] Updating race status constraint...")
+        results["status_constraint"] = migration_manager.update_race_status_constraint()
         
-        # Step 4: Create custom indexes
-        logger.info("\n[4/9] Creating custom indexes...")
+        # Step 5: Create custom indexes
+        logger.info("\n[5/9] Creating custom indexes...")
         migration_manager.create_indexes()
         results["indexes"] = {"success": True}
         
-        # Step 5: Add start/end columns to per-race participant tables
-        logger.info("\n[5/9] Ensuring per-race participant tables have start/end times...")
+        # Step 6: Add start/end columns to per-race participant tables
+        logger.info("\n[6/9] Ensuring per-race participant tables have start/end times...")
         results["participant_time_columns"] = migration_manager.ensure_participant_time_columns()
         
-        # Step 6: Add status column to per-race participant tables
-        logger.info("\n[6/9] Ensuring per-race participant tables have status column...")
+        # Step 7: Add status column to per-race participant tables
+        logger.info("\n[7/9] Ensuring per-race participant tables have status column...")
         results["participant_status_column"] = migration_manager.ensure_participant_status_column()
         
-        # Step 7: Enforce gender NOT NULL in participant tables
-        logger.info("\n[7/9] Enforcing gender NOT NULL in participant tables...")
+        # Step 8: Enforce gender NOT NULL in participant tables
+        logger.info("\n[8/9] Enforcing gender NOT NULL in participant tables...")
         results["participant_gender_not_null"] = migration_manager.ensure_participant_gender_not_null()
         
-        # Step 8: Verify schema
-        logger.info("\n[8/9] Verifying database schema...")
+        # Step 9: Verify schema
+        logger.info("\n[9/9] Verifying database schema...")
         results["verification"] = migration_manager.verify_schema()
         
         if not results["verification"]["success"]:
@@ -562,8 +608,8 @@ def run_migrations() -> Dict[str, Any]:
                 details=results["verification"]
             )
         
-        # Step 9: Seed default data
-        logger.info("\n[9/9] Seeding default data...")
+        # Step 10: Seed default data
+        logger.info("\n[10/9] Seeding default data...")
         migration_manager.seed_default_data()
         results["seeding"] = {"success": True}
         

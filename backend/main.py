@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from sqlalchemy.engine import Result, CursorResult
 
-from constants import API_PREFIX, RaceStatus, ErrorMessages, FeatureFlags
+from constants import API_PREFIX, RaceStatus, RACE_STATUS_TRANSITIONS, ErrorMessages, FeatureFlags
 from database.connection import (
     initialize_database,
     shutdown_database,
@@ -276,6 +276,20 @@ async def get_race_diagnostics(db: Session = Depends(get_db_session), _user=Depe
     return create_success_response({
         "total_races": len(races),
         "races": race_info
+    })
+
+
+@app.get(f"{API_PREFIX}/diagnostics/transitions")
+async def get_transition_diagnostics(_user=Depends(get_current_user)):
+    """Get race status transition map for debugging"""
+    return create_success_response({
+        "transitions": RACE_STATUS_TRANSITIONS,
+        "statuses": {
+            "CREATED": RaceStatus.CREATED.value,
+            "ACTIVE": RaceStatus.ACTIVE.value,
+            "STARTED": RaceStatus.STARTED.value,
+            "COMPLETED": RaceStatus.COMPLETED.value
+        }
     })
 
 
@@ -547,12 +561,12 @@ async def end_race(
 ):
     """
     End a race:
-    1. Set status to 'ended'
+    1. Set status to 'completed'
     2. Set race end_time
     """
     try:
-        # End the race; this sets status to 'ended' (irreversible)
-        race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.ENDED)
+        # End the race; this sets status to 'completed' (irreversible)
+        race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.COMPLETED)
         race_response = RaceResponse.model_validate(race, from_attributes=True)
         return create_success_response(race_response.model_dump())
     except ValidationError as ve:
@@ -561,6 +575,46 @@ async def end_race(
         raise ne
     except Exception as exc:
         logger.exception(f"Failed to end race {race_id}: {exc}")
+        raise exc
+
+
+@app.post(f"{API_PREFIX}/race/{{race_id}}/status/update")
+async def update_race_status_endpoint(
+    race_id: str,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db_session),
+    user=Depends(get_current_user)
+):
+    """
+    Unified status update endpoint for races.
+    Accepts JSON payload: {"status": "created"|"active"|"started"|"completed"}
+
+    - Setting to `created` is treated as a system rollback and will be executed with `system=True`.
+    - Setting to `active` will promote the race to active and demote any existing active race.
+    - Setting to `started` will set the race to started (demoting any existing active race first).
+    - Setting to `completed` will complete an active race (irreversible).
+    """
+    desired_status = payload.get("status")
+    if not desired_status:
+        raise ValidationError("Missing 'status' in request body")
+
+    try:
+        new_status = RaceStatus(desired_status)
+    except Exception:
+        raise ValidationError(f"Invalid status value: {desired_status}")
+
+    system_flag = True if new_status == RaceStatus.CREATED else False
+
+    try:
+        race = race_service.update_race_status(db=db, race_id=race_id, new_status=new_status, system=system_flag)
+        race_response = RaceResponse.model_validate(race, from_attributes=True)
+        return create_success_response(race_response.model_dump())
+    except ValidationError as ve:
+        raise ve
+    except NotFoundError as ne:
+        raise ne
+    except Exception as exc:
+        logger.exception(f"Failed to update race status {race_id}: {exc}")
         raise exc
 
 
@@ -1065,7 +1119,6 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
             )
             return create_success_response(response.model_dump())
         
-        race_id = str(getattr(race_row, "id"))
         race_name = getattr(race_row, "name")
         race_status = getattr(race_row, "status", "created")
         table_name_value = getattr(race_row, "table_name", None)
@@ -1602,145 +1655,145 @@ async def record_rfid_end_from_listener(
 # RACE GROUP MANAGEMENT ENDPOINTS
 # ============================================================================
 
-@app.post(f"{API_PREFIX}/races/{{race_id}}/start-group")
-async def start_race_group(
-    race_id: str,
-    payload: RaceStartRequest,
-    db: Session = Depends(get_db_session),
-    _user=Depends(get_current_user)
-):
-    """
-    Admin endpoint to start a race and all registered runners.
+# @app.post(f"{API_PREFIX}/races/{{race_id}}/start-group")
+# async def start_race_group(
+#     race_id: str,
+#     payload: RaceStartRequest,
+#     db: Session = Depends(get_db_session),
+#     _user=Depends(get_current_user)
+# ):
+#     """
+#     Admin endpoint to start a race and all registered runners.
     
-    Workflow:
-    1. Set race status from 'created' to 'started'
-    2. Find all participants with status='grace' in the per-race table
-    3. Set start_time to current time and status remains 'grace'
-    4. New RFIDs after this will have status set directly to 'running'
-    """
-    try:
-        # Verify race exists
-        race = race_service.get_race(db=db, race_id=race_id)
-        table_name_value = getattr(race, "table_name", None)
-        table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
+#     Workflow:
+#     1. Set race status from 'created' to 'started'
+#     2. Find all participants with status='grace' in the per-race table
+#     3. Set start_time to current time and status remains 'grace'
+#     4. New RFIDs after this will have status set directly to 'running'
+#     """
+#     try:
+#         # Verify race exists
+#         race = race_service.get_race(db=db, race_id=race_id)
+#         table_name_value = getattr(race, "table_name", None)
+#         table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
         
-        current_timestamp = get_current_timestamp_utc()
-        timestamp_iso = current_timestamp.isoformat()
+#         current_timestamp = get_current_timestamp_utc()
+#         timestamp_iso = current_timestamp.isoformat()
         
-        # Update all participants with status='grace' to set their start_time
-        # These are participants who were scanned at start line before race started
-        update_result = cast(CursorResult, db.execute(
-            text(f'UPDATE "{table_name}" SET start_time = :ts WHERE status = :status AND start_time IS NULL'),
-            {"ts": timestamp_iso, "status": "grace"}
-        ))
-        grace_count = update_result.rowcount if update_result.rowcount is not None else 0
-        db.commit()
+#         # Update all participants with status='grace' to set their start_time
+#         # These are participants who were scanned at start line before race started
+#         update_result = cast(CursorResult, db.execute(
+#             text(f'UPDATE "{table_name}" SET start_time = :ts WHERE status = :status AND start_time IS NULL'),
+#             {"ts": timestamp_iso, "status": "grace"}
+#         ))
+#         grace_count = update_result.rowcount if update_result.rowcount is not None else 0
+#         db.commit()
         
-        # logger.info(f"✓ Updated {grace_count} grace status participants with start_time={timestamp_iso}")
+#         # logger.info(f"✓ Updated {grace_count} grace status participants with start_time={timestamp_iso}")
         
-        # Update race status from 'created' to 'started' AND race status from 'created' to 'started'
-        db.execute(
-            text('UPDATE races SET status = :status WHERE id = :race_id'),
-            {"status": "started", "race_id": race_id}
-        )
-        db.commit()
+#         # Update race status from 'created' to 'started' AND race status from 'created' to 'started'
+#         db.execute(
+#             text('UPDATE races SET status = :status WHERE id = :race_id'),
+#             {"status": "started", "race_id": race_id}
+#         )
+#         db.commit()
         
-        # logger.info(f"✓ Updated race {race_id} status to 'started'")
+#         # logger.info(f"✓ Updated race {race_id} status to 'started'")
         
-        response = RaceStartResponse(
-            success=True,
-            message=f"Race started, {grace_count} participants assigned start time",
-            race_id=race_id,
-            group_number=1,
-            rfids_started=grace_count,
-            start_time_assigned=timestamp_iso
-        )
+#         response = RaceStartResponse(
+#             success=True,
+#             message=f"Race started, {grace_count} participants assigned start time",
+#             race_id=race_id,
+#             group_number=1,
+#             rfids_started=grace_count,
+#             start_time_assigned=timestamp_iso
+#         )
         
-        return create_success_response(response.model_dump())
+#         return create_success_response(response.model_dump())
         
-    except NotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"✗ Error starting race: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to start race"
-        )
-
-
-# ============================================================================
-# RACE GROUP QUERY ENDPOINTS
-# ============================================================================
-
-@app.get(f"{API_PREFIX}/races/{{race_id}}/groups")
-async def get_race_groups(
-    race_id: str,
-    db: Session = Depends(get_db_session),
-    _user=Depends(get_current_user)
-):
-    """
-    Get all groups for a race.
+#     except NotFoundError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail=str(e)
+#         )
+#     except Exception as e:
+#         logger.error(f"✗ Error starting race: {e}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Failed to start race"
+#         )
+# 
+#
+# # ============================================================================
+# # RACE GROUP QUERY ENDPOINTS
+# # ============================================================================
+# 
+# @app.get(f"{API_PREFIX}/races/{{race_id}}/groups")
+# async def get_race_groups(
+#     race_id: str,
+#     db: Session = Depends(get_db_session),
+#     _user=Depends(get_current_user)
+# ):
+#     """
+#     Get all groups for a race.
     
-    Returns:
-        List of groups with their RFIDs and status
-    """    
-    race_state_manager = get_race_state_manager()
+#     Returns:
+#         List of groups with their RFIDs and status
+#     """    
+#     race_state_manager = get_race_state_manager()
     
-    try:
-        groups = race_state_manager.get_all_groups(race_id)
+#     try:
+#         groups = race_state_manager.get_all_groups(race_id)
         
-        if not groups:
-            return create_success_response([])
+#         if not groups:
+#             return create_success_response([])
         
-        return create_success_response(groups)
+#         return create_success_response(groups)
         
-    except Exception as e:
-        logger.error(f"✗ Error fetching races: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch races"
-        )
+#     except Exception as e:
+#         logger.error(f"✗ Error fetching races: {e}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Failed to fetch races"
+#         )
 
 
-@app.get(f"{API_PREFIX}/races/{{race_id}}/groups/{{group_number:int}}")
-async def get_race_group(
-    race_id: str,
-    group_number: int,
-    db: Session = Depends(get_db_session),
-    _user=Depends(get_current_user)
-):
-    """
-    Get details for a specific group.
+# @app.get(f"{API_PREFIX}/races/{{race_id}}/groups/{{group_number:int}}")
+# async def get_race_group(
+#     race_id: str,
+#     group_number: int,
+#     db: Session = Depends(get_db_session),
+#     _user=Depends(get_current_user)
+# ):
+#     """
+#     Get details for a specific group.
     
-    Returns:
-        Group details including RFIDs, timestamps, and status
-    """        
-    try:
-        groups = race_state_manager.get_all_groups(race_id)
-        group = next((g for g in groups if g['group_number'] == group_number), None)
+#     Returns:
+#         Group details including RFIDs, timestamps, and status
+#     """        
+#     try:
+#         groups = race_state_manager.get_all_groups(race_id)
+#         group = next((g for g in groups if g['group_number'] == group_number), None)
         
-        if not group:
-            raise NotFoundError(
-                "Race",
-                f"Race={race_id}, Group={group_number}"
-            )
+#         if not group:
+#             raise NotFoundError(
+#                 "Race",
+#                 f"Race={race_id}, Group={group_number}"
+#             )
         
-        return create_success_response(group)
+#         return create_success_response(group)
         
-    except NotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Group {group_number} not found"
-        )
-    except Exception as e:
-        logger.error(f"✗ Error fetching group details: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch group details"
-        )
+#     except NotFoundError:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail=f"Group {group_number} not found"
+#         )
+#     except Exception as e:
+#         logger.error(f"✗ Error fetching group details: {e}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Failed to fetch group details"
+#         )
 
 
 # ============================================================================

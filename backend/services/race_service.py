@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from models import Race, Participant, RaceStatus
+from models import Race, Participant
 from basefunctions import (
     NotFoundError,
     ConflictError,
@@ -24,7 +24,14 @@ from basefunctions import (
     get_current_timestamp_utc,
     iso8601_to_timestamp,
 )
-from constants import RACE_MIN_DISTANCE_METERS, RACE_MAX_DISTANCE_METERS
+from constants import (
+    TABLE_RACES,
+    RaceStatus,
+    RACE_STATUS_TRANSITIONS,
+    ErrorMessages,
+    RACE_MIN_DISTANCE_METERS,
+    RACE_MAX_DISTANCE_METERS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +107,7 @@ class RaceService:
                 location=location,
                 scheduled_date=scheduled_date,
                 description=description,
-                # Default newly created races to ACTIVE per new rules. If another
-                # race is active we will resolve that conflict below in the same transaction.
-                status=RaceStatus.ACTIVE.value,
+                status=RaceStatus.CREATED.value,
                 created_by=created_by,
                 table_name=table_name,
                 age_upto30_excellent=age_upto30_excellent,
@@ -115,15 +120,6 @@ class RaceService:
                 age_40to45_good=age_40to45_good,
                 age_40to45_satisfactory=age_40to45_satisfactory
             )
-            
-            # Begin transaction: if another race is active, demote it to CREATED
-            # using a SELECT FOR UPDATE to avoid race conditions.
-            existing_active = db.query(Race).filter_by(status=RaceStatus.ACTIVE.value).with_for_update().first()
-            if existing_active:
-                # If an active race exists and it's not the one we're creating, rollback it to CREATED
-                if str(existing_active.id) != str(deterministic_uuid):
-                    setattr(existing_active, "status", RaceStatus.CREATED.value)
-                    db.add(existing_active)
 
             db.add(race)
             # Persist both changes in the same transaction
@@ -138,7 +134,31 @@ class RaceService:
         except IntegrityError as e:
             db.rollback()
             logger.error(f"Failed to create race: {e}")
-            raise ConflictError("Race creation failed due to constraint violation")
+            # Improve error messages for common constraint violations
+            constraint_name = None
+            orig = getattr(e, 'orig', None)
+            try:
+                # psycopg2 exposes diagnostic constraint name
+                constraint_name = orig.diag.constraint_name if orig is not None and hasattr(orig, 'diag') else None
+            except Exception:
+                constraint_name = None
+
+            msg = "Race creation failed due to constraint violation"
+
+            # Primary key collision from deterministic UUID -> same name+date
+            if constraint_name and constraint_name.lower().startswith('races_pkey'):
+                msg = "A race with the same name and scheduled date already exists."
+            else:
+                lower_err = str(orig).lower() if orig is not None else str(e).lower()
+                if 'duplicate key value' in lower_err or 'unique constraint' in lower_err or 'unique' in lower_err:
+                    if 'table_name' in lower_err:
+                        msg = "Race creation failed: generated participants table name conflicts with an existing race. Choose a different race name."
+                    elif 'id' in lower_err or 'pkey' in lower_err:
+                        msg = "A race with the same name and scheduled date already exists."
+                    else:
+                        msg = "Race creation failed due to unique constraint violation."
+
+            raise ConflictError(msg)
         except Exception as exc:
             db.rollback()
             logger.error(f"Unexpected error creating race: {exc}")
@@ -346,9 +366,13 @@ class RaceService:
 
         current_status = RaceStatus(race.status)
 
-        # Ended is irreversible
-        if current_status == RaceStatus.ENDED:
-            raise ValidationError("Cannot change status of an ended race")
+        # Validate transition using RACE_STATUS_TRANSITIONS map
+        allowed_transitions = RACE_STATUS_TRANSITIONS.get(current_status.value, [])
+        if new_status.value not in allowed_transitions:
+            raise ValidationError(
+                f"Invalid status transition: '{current_status.value}' cannot transition to '{new_status.value}'. "
+                f"Allowed transitions: {', '.join(allowed_transitions) if allowed_transitions else 'none (status is final)'}"
+            )
 
         # Handle activation: created -> active
         if new_status == RaceStatus.ACTIVE:
@@ -370,16 +394,30 @@ class RaceService:
             logger.info(f"✓ Activated race: {race_id} (demoted existing active if present)")
             return race
 
-        # Handle ending an active race
-        if new_status == RaceStatus.ENDED:
-            if current_status != RaceStatus.ACTIVE and not system:
-                raise ValidationError("Only an active race can be ended")
+        # Handle starting a race (set to 'started')
+        if new_status == RaceStatus.STARTED:
+            # Allow starting from CREATED or ACTIVE. If another race is active, demote it.
+            existing_active = db.query(Race).filter_by(status=RaceStatus.ACTIVE.value).with_for_update().first()
+            if existing_active and str(existing_active.id) != str(race_id):
+                setattr(existing_active, "status", RaceStatus.CREATED.value)
+                setattr(existing_active, "updated_at", get_current_timestamp_utc())
+                db.add(existing_active)
 
-            setattr(race, "status", RaceStatus.ENDED.value)
+            # Promote target race to STARTED
+            setattr(race, "status", RaceStatus.STARTED.value)
             setattr(race, "updated_at", get_current_timestamp_utc())
             db.commit()
             db.refresh(race)
-            logger.info(f"✓ Ended race: {race_id}")
+            logger.info(f"✓ Started race: {race_id} (demoted existing active if present)")
+            return race
+
+        # Handle completing a race (allowed from created, active, or started per transition map)
+        if new_status == RaceStatus.COMPLETED:
+            setattr(race, "status", RaceStatus.COMPLETED.value)
+            setattr(race, "updated_at", get_current_timestamp_utc())
+            db.commit()
+            db.refresh(race)
+            logger.info(f"✓ Completed race: {race_id} (from {current_status.value})")
             return race
 
         # Handle demotion to CREATED: only allowed for system actions (rollback)
@@ -387,15 +425,11 @@ class RaceService:
             if not system:
                 raise ValidationError("Setting status to 'created' is a system-only rollback")
 
-            # Only allow if current status is ACTIVE
-            if current_status != RaceStatus.ACTIVE:
-                raise ValidationError("Can only rollback an active race to 'created'")
-
             setattr(race, "status", RaceStatus.CREATED.value)
             setattr(race, "updated_at", get_current_timestamp_utc())
             db.commit()
             db.refresh(race)
-            logger.info(f"✓ Rolled back race to created: {race_id}")
+            logger.info(f"✓ Rolled back race to created: {race_id} (from {current_status.value})")
             return race
 
         # All other transitions are invalid

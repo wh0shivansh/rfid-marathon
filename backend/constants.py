@@ -56,8 +56,9 @@ DB_POOL_TIMEOUT_SECONDS: Final[int] = 30
 DB_POOL_RECYCLE_SECONDS: Final[int] = 3600  # Recycle connections every hour
 
 # SSL Configuration
-DB_SSL_MODE: Final[str] = "require"  # Enforce SSL for all connections
-DB_SSL_MIN_PROTOCOL_VERSION: Final[str] = "TLSv1.2"
+# Allow overriding SSL mode via environment variable for local dev (e.g., 'disable')
+DB_SSL_MODE: Final[str] = os.getenv("DB_SSL_MODE", "disable")  # Disable SSL for all connections by default
+DB_SSL_MIN_PROTOCOL_VERSION: Final[str] = os.getenv("DB_SSL_MIN_PROTOCOL_VERSION", "TLSv1.2")
 
 # Query Timeouts
 DB_QUERY_TIMEOUT_SECONDS: Final[int] = 30
@@ -147,9 +148,18 @@ class RaceStatus(str, Enum):
     """Enumeration of race statuses"""
     CREATED = "created"           # Race created, not started
     ACTIVE = "active"             # Race is currently active (only one can be active at a time)
-    STARTED = "started"           # Race started by admin, participants are running (deprecated, use ACTIVE)
-    ENDED = "ended"               # Race ended, all participants finished
+    STARTED = "started"           # Race started by admin, participants are running
     COMPLETED = "completed"       # Race completed, all participants finished
+
+# Race Status Transition Map
+# Defines allowed transitions between race statuses
+# Format: {current_status: [allowed_next_statuses]}
+RACE_STATUS_TRANSITIONS: Final[dict] = {
+    "created": ["active", "started", "completed"],  # Can activate, start, or complete from created
+    "active": ["created", "started", "completed"],  # Can rollback to created (system), start, or complete
+    "started": ["completed"],                        # Can only complete once started
+    "completed": []                                   # Completed is irreversible (no transitions allowed)
+}
     
 # Race distance limits (meters)
 RACE_MIN_DISTANCE_METERS: Final[int] = 10
