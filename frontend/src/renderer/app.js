@@ -501,7 +501,7 @@ async function render() {
       // Reset registration wizard when navigating to register view
       if (newView === 'register') {
         state.registrationStep = 1;
-        state.scannedRfid = null;
+        state.scannedRFID = null;
         state.selectedRace = null;
         // Fetch all participants and populate existingRFIDSet
         await fetchRaces();
@@ -511,6 +511,7 @@ async function render() {
           const rfid = (p.rfid || p.rfid_tag || '').toUpperCase();
           if (rfid) existingRFIDSet.add(rfid);
         });
+        console.debug('[Registration] existingRFIDSet populated', { size: existingRFIDSet.size });
       }
       if (newView === 'race-start') {
         // Clear previous selection so user must select a race manually
@@ -621,7 +622,7 @@ async function render() {
   if (backToStep1Btn) {
     backToStep1Btn.addEventListener("click", () => {
       state.registrationStep = 1;
-      state.scannedRfid = null;
+      state.scannedRFID = null;
       render();
     });
   }
@@ -634,7 +635,7 @@ async function render() {
       if (rfidInput && rfidInput.value) {
         const rfid = rfidInput.value.trim();
         if (rfid.length >= 8 && /^[A-Fa-f0-9]+$/.test(rfid)) {
-          state.scannedRfid = rfid.toUpperCase();
+          state.scannedRFID = rfid.toUpperCase();
           state.registrationStep = 3;
           stopRFIDListener();
           render();
@@ -671,8 +672,8 @@ async function render() {
       // Restore RFID input value
       setTimeout(() => {
         const rfidInput = document.getElementById("rfid-input-step2");
-        if (rfidInput && state.scannedRfid) {
-          rfidInput.value = state.scannedRfid;
+        if (rfidInput && state.scannedRFID) {
+          rfidInput.value = state.scannedRFID;
         }
       }, 100);
     });
@@ -690,19 +691,19 @@ async function render() {
         return;
       }
       
-      if (!state.scannedRfid) {
+      if (!state.scannedRFID) {
         showToast('No RFID tag scanned', 'error');
         return;
       }
       
       formData.raceId = state.selectedRace.id;
-      formData.rfid = state.scannedRfid;
+      formData.rfid = state.scannedRFID;
       
       await registerRunner(formData);
       
       // Reset wizard to step 1 after successful registration
       state.registrationStep = 1;
-      state.scannedRfid = null;
+      state.scannedRFID = null;
       state.selectedRace = null;
       
       regFormStep3.reset();
@@ -1057,10 +1058,13 @@ async function render() {
     // Step 3: Registration form
     const registrationForm = document.getElementById('registration-form');
     if (registrationForm) {
-      registrationForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await submitRegistration();
-      });
+      if (!registrationForm.dataset.submitAttached) {
+        registrationForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          await submitRegistration();
+        });
+        registrationForm.dataset.submitAttached = '1';
+      }
     }
 
     // Start RFID listener if on step 2
@@ -1135,10 +1139,14 @@ function attachRegistrationWizardHandlers() {
   // Step 3: Registration form
   const registrationForm = document.getElementById('registration-form');
   if (registrationForm) {
-    registrationForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      await submitRegistration();
-    });
+    // Guard against attaching multiple identical listeners when render() re-initializes handlers
+    if (!registrationForm.dataset.submitAttached) {
+      registrationForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await submitRegistration();
+      });
+      registrationForm.dataset.submitAttached = '1';
+    }
   }
 
   // Start RFID listener if on step 2
@@ -1420,8 +1428,10 @@ function goToRegistrationStep3() {
   }
   
   // Check if RFID already exists in existingRFIDSet
+  console.debug('[Registration][goToRegistrationStep3] scannedRFID=', state.scannedRFID, 'existingRFIDSet_size=', existingRFIDSet.size);
   const rfidUpper = state.scannedRFID.toUpperCase();
   if (existingRFIDSet.has(rfidUpper)) {
+    console.debug('[Registration][goToRegistrationStep3] Duplicate detected for', rfidUpper);
     showToast('This RFID tag is already registered. Please use a different RFID tag.', 'error');
     // Clear the scanned RFID and stay on step 2
     state.scannedRFID = null;
@@ -1449,6 +1459,7 @@ function startRFIDListener() {
   if (state.rfidListenerActive) return;
   
   state.rfidListenerActive = true;
+  console.debug('[Registration] startRFIDListener()');
   let rfidBuffer = '';
   let rfidTimeout = null;
   
@@ -1462,6 +1473,7 @@ function startRFIDListener() {
       if (rfidBuffer.length >= 8 && /^[A-Fa-f0-9]+$/.test(rfidBuffer)) {
         state.scannedRFID = rfidBuffer.toUpperCase();
         console.log('[Registration] RFID scanned:', state.scannedRFID);
+        console.debug('[Registration][startRFIDListener] buffer=', rfidBuffer, 'scanned=', state.scannedRFID, 'existingSetHas=', existingRFIDSet.has(state.scannedRFID));
         
         const rfidDisplay = document.getElementById('rfid-display');
         if (rfidDisplay) {
@@ -1495,6 +1507,7 @@ function stopRFIDListener() {
   }
   state.rfidListenerActive = false;
   console.log('[Registration] RFID listener stopped');
+  console.debug('[Registration] stopRFIDListener()');
 }
 
 async function submitRegistration() {
@@ -1539,7 +1552,9 @@ async function submitRegistration() {
     if (data.success) {
       // Add RFID to existingRFIDSet to prevent duplicate registration in same session
       const rfidUpper = rfid.toUpperCase();
+      console.debug('[Registration][submitRegistration] before add existingRFIDSet_has=', existingRFIDSet.has(rfidUpper), 'size=', existingRFIDSet.size);
       existingRFIDSet.add(rfidUpper);
+      console.debug('[Registration][submitRegistration] after add size=', existingRFIDSet.size);
       
       document.getElementById('registration-form').reset();
       

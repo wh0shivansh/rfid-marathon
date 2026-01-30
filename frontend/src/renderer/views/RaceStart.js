@@ -19,10 +19,15 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
   // Determine End Race button color
   let endRaceButtonColor = '#ef4444';  // Red when enabled
   
-  if (raceStatus === 'active') {
+  if (raceStatus === 'started') {
     buttonText = 'Started';
     buttonDisabled = true;
     buttonColor = '#6b7280';
+  } else if (raceStatus === 'completed') {
+    buttonText = 'Completed';
+    buttonDisabled = true;
+    buttonColor = '#6b7280';
+    endRaceButtonColor = '#6b7280';  // Gray when completed
   } else if (raceStatus === 'completed') {
     buttonText = 'Completed';
     buttonDisabled = true;

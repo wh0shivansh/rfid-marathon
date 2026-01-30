@@ -14,6 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
+import re
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -138,11 +139,10 @@ async def receive_from_hub(request: Request):
 
     timing_point = get_timing_point_from_request(request, data)
     hub_state = get_hub_state(timing_point)
-    reader_label = "Reader 1 (START)" if timing_point == TimingPoint.START else "Reader 2 (END)"
 
     # logger.debug(f"[READER-{timing_point.value.upper()}] {reader_label} - Incoming request from {request.client.host if request.client else 'unknown'}")
     # logger.debug(f"[READER-{timing_point.value.upper()}] Headers: {dict(request.headers)}")
-    # logger.debug(f"[READER-{timing_point.value.upper()}] Raw payload: {data}")
+    logger.debug(f"[READER-{timing_point.value.upper()}] Raw payload: {data}")
 
     event_type = data.get("event_type") if isinstance(data, dict) else None
     event_data = data.get("event_data", []) if isinstance(data, dict) else []
@@ -195,10 +195,23 @@ async def handle_tag_events(tags: List[Dict[str, Any]], timing_point: TimingPoin
     for idx, tag in enumerate(tags):
         try:
             # logger.debug(f"[TAG_HANDLER-{tp_label}] Processing tag #{idx + 1}: {tag}")
-            rfid = tag.get("ep") or tag.get("epc")
+            # Prefer canonical 'epc', then 'ep', then other common keys. Normalize to hex uppercase.
+            rfid_raw = tag.get("epc") or tag.get("ep") or tag.get("tid") or tag.get("id") or tag.get("tag_id")
+
+            rfid = None
+            if rfid_raw:
+                # strip any non-hex characters and uppercase
+                cleaned = re.sub(r"[^A-Fa-f0-9]", "", str(rfid_raw))
+                rfid = cleaned.upper() if cleaned else None
+
+            # fallback: try bank data (bd) if available
+            if not rfid:
+                bd = tag.get("bd", "")
+                bd_clean = re.sub(r"[^A-Fa-f0-9]", "", str(bd))
+                if bd_clean:
+                    rfid = bd_clean.upper()
 
             if not rfid:
-                # logger.warning(f"[TAG_HANDLER-{tp_label}] Tag #{idx + 1} missing RFID field: {tag}")
                 errors.append({"error": "Missing RFID field", "tag": tag})
                 continue
 
