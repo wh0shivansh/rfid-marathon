@@ -869,7 +869,11 @@ async function render() {
     const closeRaceModal = document.getElementById("close-race-modal");
     if (closeRaceModal) {
       closeRaceModal.addEventListener("click", () => {
-        document.getElementById("race-modal").style.display = "none";
+        const modal = document.getElementById("race-modal");
+        if (modal) {
+          modal.style.display = "none";
+          modal.style.pointerEvents = "none";
+        }
       });
     }
 
@@ -877,7 +881,11 @@ async function render() {
     const cancelRaceForm = document.getElementById("cancel-race-form");
     if (cancelRaceForm) {
       cancelRaceForm.addEventListener("click", () => {
-        document.getElementById("race-modal").style.display = "none";
+        const modal = document.getElementById("race-modal");
+        if (modal) {
+          modal.style.display = "none";
+          modal.style.pointerEvents = "none";
+        }
       });
     }
 
@@ -905,7 +913,11 @@ async function render() {
             await createRace(formData);
           }
           
-          document.getElementById("race-modal").style.display = "none";
+          const modalClose = document.getElementById("race-modal");
+          if (modalClose) {
+            modalClose.style.display = "none";
+            modalClose.style.pointerEvents = "none";
+          }
         } catch (err) {
           console.error("Form submission error:", err);
         }
@@ -931,6 +943,7 @@ async function render() {
           document.getElementById("race-description").value = race.description || "";
           
           modal.style.display = "flex";
+          modal.style.pointerEvents = "auto";
         }
       });
     });
@@ -1231,6 +1244,7 @@ function attachCandidateManagementHandlers() {
       if (raceEl) { raceEl.disabled = true; }
 
       modal.style.display = 'flex';
+      modal.style.pointerEvents = 'auto';
     });
   });
 
@@ -1253,7 +1267,10 @@ function attachCandidateModalControls() {
   if (closeCandidateModal) {
     closeCandidateModal.addEventListener('click', () => {
       const modal = document.getElementById('candidate-modal');
-      if (modal) modal.style.display = 'none';
+      if (modal) {
+        modal.style.display = 'none';
+        modal.style.pointerEvents = 'none';
+      }
     });
   }
 
@@ -1261,7 +1278,10 @@ function attachCandidateModalControls() {
   if (cancelCandidateForm) {
     cancelCandidateForm.addEventListener('click', () => {
       const modal = document.getElementById('candidate-modal');
-      if (modal) modal.style.display = 'none';
+      if (modal) {
+        modal.style.display = 'none';
+        modal.style.pointerEvents = 'none';
+      }
     });
   }
 
@@ -1280,7 +1300,10 @@ function attachCandidateModalControls() {
           await updateCandidate(candidateId, updates);
         }
         const modal = document.getElementById('candidate-modal');
-        if (modal) modal.style.display = 'none';
+        if (modal) {
+          modal.style.display = 'none';
+          modal.style.pointerEvents = 'none';
+        }
       } catch (err) {
         // Errors handled by updateCandidate
       }
@@ -1761,7 +1784,7 @@ async function loadRaceStartRaces() {
       races.forEach((race) => {
         const option = document.createElement('option');
         option.value = race.id;
-        option.textContent = race.name;
+        option.textContent = `${race.name} - ${race.distance_meters}m - (${new Date(race.scheduled_date).toLocaleDateString()})`;
         // Only set selected if it matches the current state
         if (race.id === raceStartSelectedRaceId) {
             option.selected = true;
@@ -1812,7 +1835,7 @@ async function handleRaceStartSubmit(event) {
       });
       
       raceStartTime = new Date();
-      showToast('✓ Race started successfully', 'success');
+      showToast('Race started successfully', 'success');
       
       // Refresh races and re-render to update button state
       await fetchRaces();
