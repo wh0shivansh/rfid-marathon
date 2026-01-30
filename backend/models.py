@@ -150,7 +150,7 @@ class ParticipantRegisterRequest(BaseModel):
     race_id: str
     rfid_tag: str = Field(..., min_length=RFID_TAG_MIN_LENGTH, max_length=RFID_TAG_MAX_LENGTH)
     name: str = Field(..., min_length=PARTICIPANT_NAME_MIN_LENGTH, max_length=PARTICIPANT_NAME_MAX_LENGTH)
-    age: Optional[int] = Field(None, ge=5, le=120)
+    age: int = Field(..., ge=10, le=100)
     gender: str = Field(..., pattern="^(M|F|O)$")
     category: Optional[str] = Field(None, max_length=50)
 
@@ -180,8 +180,8 @@ class ParticipantResponse(BaseModel):
     rfid_tag: str
     encrypted_name: str  # RSA encrypted, base64 encoded
     encryption_key: Optional[str] = None
-    age: Optional[int]
-    gender: Optional[str]
+    age: int
+    gender: str
     category: Optional[str]
     registered_at: str
 
@@ -376,7 +376,7 @@ class Participant(Base):
     race_id = Column(UUID(as_uuid=False), ForeignKey('races.id', ondelete='CASCADE'), nullable=False, index=True)
     rfid_tag = Column(String(32), nullable=False, index=True)  # PLAINTEXT (requirement)
     encrypted_name = Column(Text, nullable=False)  # Fernet encrypted
-    age = Column(Integer, nullable=True)
+    age = Column(Integer, nullable=False)
     gender = Column(String(1), nullable=False)
     category = Column(String(50), nullable=True)
     registered_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

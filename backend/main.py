@@ -674,8 +674,8 @@ async def register_participant(
         race_id=str(participant.race_id),
         rfid_tag=str(participant.rfid_tag),
         encrypted_name=encrypted_name_rsa,
-        age=cast(Optional[int], participant.age),
-        gender=cast(Optional[str], participant.gender),
+        age=cast(int, participant.age),
+        gender=cast(str, participant.gender),
         category=cast(Optional[str], participant.category),
         registered_at=participant.registered_at.isoformat()
     )
