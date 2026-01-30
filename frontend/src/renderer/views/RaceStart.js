@@ -87,9 +87,9 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
                 <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Race Details</div>
                 <div id="race-info" style="color: #cbd5e1; font-size: 14px;">Select a race to view details</div>
               </div>
-              <div>
-                <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Polling Status</div>
-                <div id="ws-status" style="color: #ef4444; font-size: 14px;">⚪ Inactive</div>
+              <div id="duration-container" style="display: none;">
+                <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Duration</div>
+                <div id="race-duration" style="color: #10b981; font-size: 20px; font-weight: bold;">00:00:00</div>
               </div>
             </div>
           </div>

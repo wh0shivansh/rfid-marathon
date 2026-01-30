@@ -200,7 +200,7 @@ class RFIDService:
         encrypt_response: bool = True
     ) -> dict:
         """
-        Lookup participant by RFID tag.
+        Lookup participant by RFID tag in the per-race participant table.
         Returns encrypted name using RSA for frontend decryption.
         
         Args:
@@ -222,18 +222,37 @@ class RFIDService:
         # Normalize RFID tag
         rfid_tag = rfid_tag.upper()
         
-        # Find participant
-        participant = db.query(Participant).filter_by(
-            race_id=race_id,
-            rfid_tag=rfid_tag
-        ).first()
+        # Get race to find participant table name
+        race = db.query(Race).filter_by(id=race_id).first()
+        if not race:
+            raise NotFoundError("Race", race_id)
         
-        if not participant:
+        participant_table = cast(Optional[str], race.table_name)
+        if participant_table is None or participant_table.strip() == "":
+            raise ValidationError("Race does not have a participant table configured")
+        
+        # Query the per-race participant table (not the ORM template table)
+        lookup_sql = text(f"""
+            SELECT id, race_id, rfid_tag, encrypted_name, age, gender, category, registered_at
+            FROM "{participant_table}"
+            WHERE race_id = :race_id AND rfid_tag = :rfid_tag
+        """)
+        result = db.execute(lookup_sql, {"race_id": race_id, "rfid_tag": rfid_tag}).fetchone()
+        
+        if not result:
             raise NotFoundError("Participant", f"RFID={rfid_tag}, Race={race_id}")
+        
+        # Extract participant data from query result
+        participant_id = result[0] if hasattr(result, '__getitem__') else getattr(result, 'id')
+        encrypted_name_stored = result[3] if hasattr(result, '__getitem__') else getattr(result, 'encrypted_name')
+        age = result[4] if hasattr(result, '__getitem__') else getattr(result, 'age')
+        gender = result[5] if hasattr(result, '__getitem__') else getattr(result, 'gender')
+        category = result[6] if hasattr(result, '__getitem__') else getattr(result, 'category')
+        registered_at = result[7] if hasattr(result, '__getitem__') else getattr(result, 'registered_at')
         
         # Decrypt name from database (Fernet encrypted)
         try:
-            decrypted_name = self.fernet_manager.decrypt(cast(str, participant.encrypted_name))
+            decrypted_name = self.fernet_manager.decrypt(cast(str, encrypted_name_stored))
         except Exception as e:
             logger.error(f"Failed to decrypt participant name: {e}")
             raise ValidationError("Failed to decrypt participant data")
@@ -245,14 +264,14 @@ class RFIDService:
             rsa_encrypted_name = decrypted_name  # For testing/backend use
         
         return {
-            "id": participant.id,
-            "race_id": participant.race_id,
-            "rfid_tag": participant.rfid_tag,
+            "id": str(participant_id),
+            "race_id": str(race_id),
+            "rfid_tag": rfid_tag,
             "encrypted_name": rsa_encrypted_name,  # RSA encrypted
-            "age": participant.age,
-            "gender": participant.gender,
-            "category": participant.category,
-            "registered_at": participant.registered_at.isoformat()
+            "age": age,
+            "gender": gender,
+            "category": category,
+            "registered_at": registered_at.isoformat() if hasattr(registered_at, 'isoformat') else str(registered_at)
         }
     
     def get_participant_by_id(
@@ -275,30 +294,59 @@ class RFIDService:
         Raises:
             NotFoundError: If participant not found
         """
-        participant = db.query(Participant).filter_by(id=participant_id).first()
-        
-        if not participant:
+        # Search each per-race participant table for the participant ID
+        try:
+            race_rows = db.execute(text("SELECT id, table_name FROM races")).fetchall()
+        except Exception:
             raise NotFoundError("Participant", participant_id)
-        
-        # Optionally decrypt name
-        name_field = participant.encrypted_name
-        if decrypt_name:
+
+        for row in race_rows:
+            table_name = row.table_name if hasattr(row, 'table_name') else row[1]
+            if not table_name:
+                continue
             try:
-                name_field = self.fernet_manager.decrypt(cast(str, participant.encrypted_name))
-            except Exception as e:
-                logger.error(f"Failed to decrypt participant name: {e}")
-                name_field = "<DECRYPTION_FAILED>"
-        
-        return {
-            "id": participant.id,
-            "race_id": participant.race_id,
-            "rfid_tag": participant.rfid_tag,
-            "name": name_field,
-            "age": participant.age,
-            "gender": participant.gender,
-            "category": participant.category,
-            "registered_at": participant.registered_at.isoformat()
-        }
+                lookup_sql = text(f'''
+                    SELECT id, race_id, rfid_tag, encrypted_name, age, gender, category, registered_at
+                    FROM "{table_name}"
+                    WHERE id = :participant_id
+                ''')
+                res = db.execute(lookup_sql, {"participant_id": participant_id}).fetchone()
+            except Exception:
+                # Table may not exist or be inaccessible; skip
+                continue
+
+            if res:
+                # Extract fields
+                pid = res[0]
+                race_id = res[1]
+                rfid_tag = res[2]
+                encrypted_name_stored = res[3]
+                age = res[4]
+                gender = res[5]
+                category = res[6]
+                registered_at = res[7]
+
+                name_field = encrypted_name_stored
+                if decrypt_name:
+                    try:
+                        name_field = self.fernet_manager.decrypt(cast(str, encrypted_name_stored))
+                    except Exception as e:
+                        logger.error(f"Failed to decrypt participant name: {e}")
+                        name_field = "<DECRYPTION_FAILED>"
+
+                return {
+                    "id": str(pid),
+                    "race_id": str(race_id),
+                    "rfid_tag": rfid_tag,
+                    "name": name_field,
+                    "age": age,
+                    "gender": gender,
+                    "category": category,
+                    "registered_at": registered_at.isoformat() if hasattr(registered_at, 'isoformat') else str(registered_at)
+                }
+
+        # Not found in any per-race table
+        raise NotFoundError("Participant", participant_id)
     
     def check_rfid_exists(
         self,
@@ -307,7 +355,7 @@ class RFIDService:
         rfid_tag: str
     ) -> bool:
         """
-        Check if RFID tag is already registered for a race.
+        Check if RFID tag is already registered for a specific race in that race's participant table.
         
         Args:
             db: Database session
@@ -315,16 +363,36 @@ class RFIDService:
             rfid_tag: RFID tag
             
         Returns:
-            bool: True if exists, False otherwise
+            bool: True if exists in this race, False otherwise
         """
         rfid_tag = rfid_tag.upper()
         
-        exists = db.query(Participant).filter_by(
-            race_id=race_id,
-            rfid_tag=rfid_tag
-        ).first() is not None
+        # Get race to find participant table name
+        race = db.query(Race).filter_by(id=race_id).first()
+        if not race:
+            return False
         
-        return exists
+        participant_table = cast(Optional[str], race.table_name)
+        if participant_table is None or participant_table.strip() == "":
+            return False
+        
+        # Check the per-race participant table
+        check_sql = text(f"""
+            SELECT COUNT(*) as count FROM "{participant_table}"
+            WHERE race_id = :race_id AND rfid_tag = :rfid_tag
+        """)
+        result = db.execute(check_sql, {"race_id": race_id, "rfid_tag": rfid_tag}).fetchone()
+        
+        if not result:
+            return False
+        # support both Row objects with attribute 'count' and tuple-like rows
+        count_value = getattr(result, 'count', None)
+        if count_value is None:
+            count_value = result[0]
+        try:
+            return int(count_value) > 0
+        except Exception:
+            return bool(count_value)
 
 
 # ============================================================================

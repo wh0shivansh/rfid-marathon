@@ -120,6 +120,8 @@ class RaceResponse(BaseModel):
     age_40to45_excellent: float = 1878
     age_40to45_good: float = 1980
     age_40to45_satisfactory: float = 2100
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -348,6 +350,8 @@ class Race(Base):
     age_40to45_excellent = Column(Float, nullable=False, default=1878)  # 31.30 min
     age_40to45_good = Column(Float, nullable=False, default=1980)  # 33 min
     age_40to45_satisfactory = Column(Float, nullable=False, default=2100)  # 35 min
+    start_time = Column(DateTime(timezone=True), nullable=True)  # When race was started (from frontend)
+    end_time = Column(DateTime(timezone=True), nullable=True)  # When race was ended
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_by = Column(UUID(as_uuid=False), ForeignKey('users.id'), nullable=False)

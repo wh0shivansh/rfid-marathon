@@ -181,6 +181,48 @@ class MigrationManager:
             results["success"] = False
             results["error"] = str(e)
             return results
+
+    def ensure_race_timing_columns(self) -> Dict[str, Any]:
+        """
+        Ensure races table includes start_time and end_time columns.
+        IDEMPOTENT and safe across all environments.
+        """
+        results: Dict[str, Any] = {"added_columns": [], "skipped": []}
+        try:
+            if self.engine is None:
+                return {"success": False, "error": "No engine"}
+            inspector = inspect(self.engine)
+            
+            if not self.table_exists("races"):
+                logger.info("Races table does not exist, skipping timing columns")
+                return {"success": True, "skipped": True}
+            
+            cols = [col['name'] for col in inspector.get_columns('races')] if inspector else []
+            
+            with self.engine.connect() as conn:
+                if 'start_time' not in cols:
+                    conn.execute(text("ALTER TABLE races ADD COLUMN start_time TIMESTAMP WITH TIME ZONE NULL"))
+                    results["added_columns"].append("start_time")
+                    logger.info("✓ Added start_time column to races table")
+                else:
+                    results["skipped"].append("start_time")
+                
+                if 'end_time' not in cols:
+                    conn.execute(text("ALTER TABLE races ADD COLUMN end_time TIMESTAMP WITH TIME ZONE NULL"))
+                    results["added_columns"].append("end_time")
+                    logger.info("✓ Added end_time column to races table")
+                else:
+                    results["skipped"].append("end_time")
+                
+                conn.commit()
+            
+            results["success"] = True
+            return results
+        except Exception as e:
+            logger.error(f"✗ Failed ensuring race timing columns: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            return results
     
     def table_exists(self, table_name: str) -> bool:
         """
@@ -598,8 +640,12 @@ def run_migrations() -> Dict[str, Any]:
         logger.info("\n[8/9] Enforcing gender NOT NULL in participant tables...")
         results["participant_gender_not_null"] = migration_manager.ensure_participant_gender_not_null()
         
-        # Step 9: Verify schema
-        logger.info("\n[9/9] Verifying database schema...")
+        # Step 9: Add race timing columns (start_time, end_time)
+        logger.info("\n[9/11] Adding race timing columns (start_time, end_time)...")
+        results["race_timing_columns"] = migration_manager.ensure_race_timing_columns()
+        
+        # Step 10: Verify schema
+        logger.info("\n[10/11] Verifying database schema...")
         results["verification"] = migration_manager.verify_schema()
         
         if not results["verification"]["success"]:
@@ -608,8 +654,8 @@ def run_migrations() -> Dict[str, Any]:
                 details=results["verification"]
             )
         
-        # Step 10: Seed default data
-        logger.info("\n[10/9] Seeding default data...")
+        # Step 11: Seed default data
+        logger.info("\n[11/11] Seeding default data...")
         migration_manager.seed_default_data()
         results["seeding"] = {"success": True}
         

@@ -93,12 +93,42 @@ const state = {
   selectedRaceFilter: null, // For filtering participants by race
 };
 
-// RFID Deduplication Set - populated on registration page load
-let existingRFIDSet = new Set();
+// Per-race RFID deduplication map: raceId -> Set(rfid)
+const perRaceRFIDMap = new Map();
+
+function getSelectedRaceId() {
+  if (!state.selectedRace) return null;
+  return typeof state.selectedRace === 'object' ? state.selectedRace.id : state.selectedRace;
+}
+
+function getRFIDSetForRace(raceId) {
+  if (!raceId) return new Set();
+  if (!perRaceRFIDMap.has(raceId)) perRaceRFIDMap.set(raceId, new Set());
+  return perRaceRFIDMap.get(raceId);
+}
+
+async function populateRFIDSetForRace(raceId) {
+  if (!raceId) return;
+  try {
+    await fetchParticipants(raceId);
+    const set = new Set();
+    state.participants.forEach(p => {
+      const rfid = (p.rfid || p.rfid_tag || '').toUpperCase();
+      if (rfid) set.add(rfid);
+    });
+    perRaceRFIDMap.set(raceId, set);
+    console.debug('[Registration] populated RFID set for race', raceId, { size: set.size });
+  } catch (err) {
+    console.error('Failed to populate RFID set for race', raceId, err);
+  }
+}
 
 // Candidate Management View state
 let candidateManagementSelectedRaceId = null;
 let scoreboardSelectedRaceId = null;
+let scoreboardSearchQuery = '';
+let scoreboardSortKey = 'durationMs';
+let scoreboardSortDir = 'asc';
 
 // Race Start View state
 let raceStartSelectedRaceId = null;
@@ -106,6 +136,7 @@ let raceStartSelectedRaceId = null;
 let raceStartSelectedGroupNumber = 1;
 let raceStartTime = null;
 let raceStartPollingInterval = null;
+let durationClockInterval = null;
 
 // Expose state to CandidateRegistration component
 window.appState = state;
@@ -232,10 +263,15 @@ function decryptName(encryptedName, key) {
   }
 }
 
-async function fetchParticipants(raceId = null) {
+async function fetchParticipants(raceId = null, includeTiming = false) {
   try {
     await ensureAuth();
-    const endpoint = raceId ? `/race/${raceId}/participants` : `/participants`;
+    let endpoint;
+    if (raceId) {
+      endpoint = `/race/${raceId}/participants` + (includeTiming ? '?include_timing=true' : '');
+    } else {
+      endpoint = `/participants`;
+    }
     const participants = await apiRequest(endpoint);
     
     state.participants = (participants || []).map(p => {
@@ -274,6 +310,15 @@ async function registerRunner(formData) {
       category: formData.category || "",
       created_at: new Date().toISOString(),
     });
+
+    // Add to per-race RFID set to prevent immediate duplicate within this race
+    try {
+      const rfidUpper = formData.rfid.toUpperCase();
+      const set = getRFIDSetForRace(formData.raceId);
+      set.add(rfidUpper);
+    } catch (e) {
+      console.debug('Could not add RFID to per-race set', e);
+    }
 
     showToast("Runner registered successfully", 'success');
     render();
@@ -355,8 +400,13 @@ async function startRace(raceId) {
   return await globalLoader.wrap(async () => {
     try {
       await ensureAuth();
+      
+      // Send current timestamp from frontend
+      const startTime = new Date().toISOString();
+      
       await apiRequest(`/race/${raceId}/start`, {
         method: "POST",
+        body: { start_time: startTime }
       });
       
       showToast("Race started successfully", 'success');
@@ -449,6 +499,13 @@ function renderHeader() {
         <span class="pill">Registrations done today: ${state.dashboardData.todayRegistrations}</span>
       </div>
       <div class="actions">
+      ${state.view == 'race-start' ? 
+        `
+        <div>
+          <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Polling Status</div>
+          <div id="ws-status" style="color: #ef4444; font-size: 14px;">⚪ Inactive</div>
+        </div> 
+        `: ``}
         <button class="ghost" id="refresh-btn">Refresh races</button>
       </div>
     </div>
@@ -467,11 +524,16 @@ async function render() {
     stopRaceDataPolling();
   }
   
+  // Cleanup duration clock when leaving race-start view
+  if (state.view !== "race-start" && durationClockInterval) {
+    stopDurationClock();
+  }
+  
   // Cleanup RFID listener when leaving registration view
   if (state.view !== "register" && state.rfidListenerActive) {
     stopRFIDListener();
-    // Clear existingRFIDSet when leaving registration page
-    existingRFIDSet.clear();
+    // Clear per-race RFID map when leaving registration page
+    perRaceRFIDMap.clear();
   }
   
   const htmlContent = `
@@ -485,7 +547,7 @@ async function render() {
         ${state.view === "race-start" ? renderRaceStart(state.races, raceStartSelectedRaceId) : ""}
         ${state.view === "register" ? renderRegister() : ""}
         ${state.view === "candidate-management" ? renderCandidateManagement(state.races, state.participants, candidateManagementSelectedRaceId) : ""}
-        ${state.view === "scoreboard" ? renderScoreboard(state.races, state.participants, scoreboardSelectedRaceId) : ""}
+        ${state.view === "scoreboard" ? renderScoreboard(state.races, state.participants, scoreboardSelectedRaceId, { searchQuery: scoreboardSearchQuery, sortKey: scoreboardSortKey, sortDir: scoreboardSortDir }) : ""}
       </div>
     </div>
   `;
@@ -503,15 +565,8 @@ async function render() {
         state.registrationStep = 1;
         state.scannedRFID = null;
         state.selectedRace = null;
-        // Fetch all participants and populate existingRFIDSet
+        // Load races; per-race RFID sets will be populated when a race is selected
         await fetchRaces();
-        await fetchParticipants();
-        existingRFIDSet.clear();
-        state.participants.forEach(p => {
-          const rfid = (p.rfid || p.rfid_tag || '').toUpperCase();
-          if (rfid) existingRFIDSet.add(rfid);
-        });
-        console.debug('[Registration] existingRFIDSet populated', { size: existingRFIDSet.size });
       }
       if (newView === 'race-start') {
         // Clear previous selection so user must select a race manually
@@ -531,10 +586,10 @@ async function render() {
         await fetchParticipants(candidateManagementSelectedRaceId);
       }
 
-      // When opening scoreboard view, fetch participants
+      // When opening scoreboard view, fetch participants with timing data
       if (newView === 'scoreboard') {
         await fetchRaces();
-        await fetchParticipants(scoreboardSelectedRaceId);
+        await fetchParticipants(scoreboardSelectedRaceId, true);
       }
 
       state.view = newView;
@@ -551,7 +606,7 @@ async function render() {
         await fetchParticipants(candidateManagementSelectedRaceId);
       }
       if (state.view === 'scoreboard') {
-        await fetchParticipants(scoreboardSelectedRaceId);
+        await fetchParticipants(scoreboardSelectedRaceId, true);
       }
       render();
     });
@@ -1099,11 +1154,13 @@ function attachRegistrationWizardHandlers() {
   // Step 1: Race Selection
   const continueStep1 = document.getElementById('continue-step1');
   if (continueStep1) {
-    continueStep1.addEventListener('click', () => {
+    continueStep1.addEventListener('click', async () => {
       const raceSelect = document.getElementById('race-select-dropdown');
       if (raceSelect && raceSelect.value) {
         state.selectedRace = raceSelect.value;
         state.registrationStep = 2;
+        // Populate per-race RFID set for the selected race
+        await populateRFIDSetForRace(getSelectedRaceId());
         render();
       } else {
         showToast('Please select a race to continue', 'warning');
@@ -1198,6 +1255,8 @@ function attachCandidateManagementHandlers() {
       state.selectedRace = candidateManagementSelectedRaceId || null;
       // Ensure races are loaded for the registration page
       await fetchRaces();
+      // Pre-populate per-race RFID set if a race was preselected
+      if (getSelectedRaceId()) await populateRFIDSetForRace(getSelectedRaceId());
       state.view = 'register';
       render();
     });
@@ -1320,10 +1379,10 @@ function attachScoreboardHandlers() {
 
   // Race filter dropdown (only completed races)
   const scoreboardRaceFilterDropdown = document.getElementById('scoreboard-race-filter-dropdown');
-  if (scoreboardRaceFilterDropdown) {
+    if (scoreboardRaceFilterDropdown) {
     scoreboardRaceFilterDropdown.addEventListener('change', async (e) => {
       scoreboardSelectedRaceId = e.target.value || null;
-      await fetchParticipants(scoreboardSelectedRaceId);
+      await fetchParticipants(scoreboardSelectedRaceId, true);
       render();
     });
   }
@@ -1333,6 +1392,45 @@ function attachScoreboardHandlers() {
   if (exportScoreboardBtn) {
     exportScoreboardBtn.addEventListener('click', () => {
       showToast('Export feature coming soon', 'info');
+    });
+  }
+
+  // Search input (client-side filter by name)
+  const scoreboardSearchInput = document.getElementById('scoreboard-search-input');
+  if (scoreboardSearchInput) {
+    scoreboardSearchInput.addEventListener('input', (e) => {
+      const val = e.target.value || '';
+      const pos = (e.target.selectionStart != null) ? e.target.selectionStart : null;
+      scoreboardSearchQuery = val;
+      render();
+      // restore focus and caret after re-render
+      setTimeout(() => {
+        const el = document.getElementById('scoreboard-search-input');
+        if (el) {
+          el.focus();
+          if (pos !== null) {
+            try { el.setSelectionRange(pos, pos); } catch (err) { /* ignore */ }
+          }
+        }
+      }, 0);
+    });
+  }
+
+  // Column sort toggles
+  const sortToggles = document.querySelectorAll('.scoreboard-sort-toggle');
+  if (sortToggles && sortToggles.length) {
+    sortToggles.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const key = btn.dataset.key;
+        if (!key) return;
+        if (scoreboardSortKey === key) {
+          scoreboardSortDir = scoreboardSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          scoreboardSortKey = key;
+          scoreboardSortDir = 'asc';
+        }
+        render();
+      });
     });
   }
 }
@@ -1444,18 +1542,29 @@ function goToRegistrationStep2() {
   startRFIDListener();
 }
 
-function goToRegistrationStep3() {
+async function goToRegistrationStep3() {
   if (!state.scannedRFID) {
     showToast('Please scan an RFID tag first', 'warning');
     return;
   }
-  
-  // Check if RFID already exists in existingRFIDSet
-  console.debug('[Registration][goToRegistrationStep3] scannedRFID=', state.scannedRFID, 'existingRFIDSet_size=', existingRFIDSet.size);
+  // Ensure we check duplicates for the selected race only
   const rfidUpper = state.scannedRFID.toUpperCase();
-  if (existingRFIDSet.has(rfidUpper)) {
-    console.debug('[Registration][goToRegistrationStep3] Duplicate detected for', rfidUpper);
-    showToast('This RFID tag is already registered. Please use a different RFID tag.', 'error');
+  const selectedRaceId = getSelectedRaceId();
+  if (!selectedRaceId) {
+    showToast('Please select a race before continuing', 'warning');
+    return;
+  }
+
+  // Populate per-race set if not already present
+  if (!perRaceRFIDMap.has(selectedRaceId)) {
+    await populateRFIDSetForRace(selectedRaceId);
+  }
+
+  const existingSet = getRFIDSetForRace(selectedRaceId);
+  console.debug('[Registration][goToRegistrationStep3] scannedRFID=', state.scannedRFID, 'existingSet_size=', existingSet.size);
+  if (existingSet.has(rfidUpper)) {
+    console.debug('[Registration][goToRegistrationStep3] Duplicate detected for', rfidUpper, 'in race', selectedRaceId);
+    showToast('This RFID tag is already registered for this race. Please use a different RFID tag.', 'error');
     // Clear the scanned RFID and stay on step 2
     state.scannedRFID = null;
     const rfidDisplay = document.getElementById('rfid-display');
@@ -1496,7 +1605,9 @@ function startRFIDListener() {
       if (rfidBuffer.length >= 8 && /^[A-Fa-f0-9]+$/.test(rfidBuffer)) {
         state.scannedRFID = rfidBuffer.toUpperCase();
         console.log('[Registration] RFID scanned:', state.scannedRFID);
-        console.debug('[Registration][startRFIDListener] buffer=', rfidBuffer, 'scanned=', state.scannedRFID, 'existingSetHas=', existingRFIDSet.has(state.scannedRFID));
+        const selRace = getSelectedRaceId();
+        const setHas = selRace ? getRFIDSetForRace(selRace).has(state.scannedRFID.toUpperCase()) : false;
+        console.debug('[Registration][startRFIDListener] buffer=', rfidBuffer, 'scanned=', state.scannedRFID, 'perRaceHas=', setHas, 'race=', selRace);
         
         const rfidDisplay = document.getElementById('rfid-display');
         if (rfidDisplay) {
@@ -1573,11 +1684,15 @@ async function submitRegistration() {
 
     const data = await response.json();
     if (data.success) {
-      // Add RFID to existingRFIDSet to prevent duplicate registration in same session
+      // Add RFID to per-race set to prevent duplicate registration in same race/session
       const rfidUpper = rfid.toUpperCase();
-      console.debug('[Registration][submitRegistration] before add existingRFIDSet_has=', existingRFIDSet.has(rfidUpper), 'size=', existingRFIDSet.size);
-      existingRFIDSet.add(rfidUpper);
-      console.debug('[Registration][submitRegistration] after add size=', existingRFIDSet.size);
+      const raceId = getSelectedRaceId();
+      if (raceId) {
+        const set = getRFIDSetForRace(raceId);
+        console.debug('[Registration][submitRegistration] before add perRace_has=', set.has(rfidUpper), 'size=', set.size);
+        set.add(rfidUpper);
+        console.debug('[Registration][submitRegistration] after add size=', set.size);
+      }
       
       document.getElementById('registration-form').reset();
       
@@ -1804,6 +1919,7 @@ function handleRaceStartRaceChange(event) {
   if (!newId) {
     raceStartSelectedRaceId = null;
     stopRaceDataPolling();
+    stopDurationClock();
     render();
     return;
   }
@@ -1813,8 +1929,14 @@ function handleRaceStartRaceChange(event) {
   // Re-render to update UI panels/buttons
   render();
   
+  // Update race details display
+  updateRaceDetailsDisplay();
+  
   // Start polling now that a race is explicitly selected
   startRaceDataPolling();
+  
+  // Start duration clock if race is started
+  startDurationClock();
 }
 
 async function handleRaceStartSubmit(event) {
@@ -1829,9 +1951,13 @@ async function handleRaceStartSubmit(event) {
     try {
       await ensureAuth();
       
+      // Send current timestamp from frontend
+      const startTime = new Date().toISOString();
+      
       // Call backend API to start the race
       await apiRequest(`/race/${raceStartSelectedRaceId}/start`, {
-        method: 'POST'
+        method: 'POST',
+        body: { start_time: startTime }
       });
       
       raceStartTime = new Date();
@@ -1840,6 +1966,12 @@ async function handleRaceStartSubmit(event) {
       // Refresh races and re-render to update button state
       await fetchRaces();
       render();
+      
+      // Update race details
+      updateRaceDetailsDisplay();
+      
+      // Start duration clock
+      startDurationClock();
       
       // Refresh data to show updated times and status
       await refreshRaceStartData();
@@ -1873,6 +2005,13 @@ async function refreshRaceStartData() {
     };
     updateRaceStartCandidateDisplay(grouped);
     updateRaceStartStatistics(participants);
+    
+    // Refresh race data to get updated start_time/end_time
+    await fetchRaces();
+    
+    // Update race details and duration
+    updateRaceDetailsDisplay();
+    updateDurationDisplay();
   } catch (e) {
     console.error('Failed to refresh race data from backend:', e);
     updateRaceStartWSStatus(false, 'Connection Error');
@@ -1890,6 +2029,126 @@ function showRaceStartStatusMessage(message, type = 'info') {
   };
   
   statusEl.innerHTML = `<div style="padding: 12px; background: ${colors[type]}20; border: 1px solid ${colors[type]}; border-radius: 4px; color: ${colors[type]};">${message}</div>`;
+}
+
+// ===== Duration Clock Functions =====
+
+function formatDuration(milliseconds) {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function updateDurationDisplay() {
+  if (!raceStartSelectedRaceId || !state.races) return;
+  
+  const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
+  if (!selectedRace) return;
+  
+  const durationContainer = document.getElementById('duration-container');
+  const durationDisplay = document.getElementById('race-duration');
+  
+  if (!durationContainer || !durationDisplay) return;
+  
+  // Only show duration if race has start_time
+  if (!selectedRace.start_time) {
+    durationContainer.style.display = 'none';
+    return;
+  }
+  
+  durationContainer.style.display = 'block';
+  
+  const startTime = new Date(selectedRace.start_time);
+  let duration;
+  
+  // If race is completed, use end_time - start_time (static)
+  if (selectedRace.status === 'completed' && selectedRace.end_time) {
+    const endTime = new Date(selectedRace.end_time);
+    duration = endTime - startTime;
+  } else {
+    // Race is running, use current time - start_time (live)
+    duration = Date.now() - startTime;
+  }
+  
+  durationDisplay.textContent = formatDuration(duration);
+}
+
+function startDurationClock() {
+  // Clear existing interval if any
+  stopDurationClock();
+  
+  // Only start if selected race has start_time
+  if (!raceStartSelectedRaceId || !state.races) return;
+  
+  const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
+  if (!selectedRace || !selectedRace.start_time) return;
+  
+  // Update immediately
+  updateDurationDisplay();
+  
+  // Update every second for live races
+  if (selectedRace.status === 'started' || selectedRace.status === 'active') {
+    durationClockInterval = setInterval(updateDurationDisplay, 1000);
+  }
+}
+
+function stopDurationClock() {
+  if (durationClockInterval) {
+    clearInterval(durationClockInterval);
+    durationClockInterval = null;
+  }
+}
+
+function updateRaceDetailsDisplay() {
+  if (!raceStartSelectedRaceId || !state.races) return;
+  
+  const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
+  const raceInfoEl = document.getElementById('race-info');
+  
+  if (!raceInfoEl) return;
+  
+  if (!selectedRace) {
+    raceInfoEl.innerHTML = 'Select a race to view details';
+    return;
+  }
+  
+  // Format scheduled date
+  const scheduledDate = new Date(selectedRace.scheduled_date).toLocaleDateString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+  
+  // Format start and end times if available
+  let timingInfo = '';
+  if (selectedRace.start_time) {
+    const startTime = new Date(selectedRace.start_time).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    timingInfo += `<div style="margin-top: 4px; font-size: 12px; color: #94a3b8;">Started: ${startTime}</div>`;
+  }
+  
+  if (selectedRace.end_time) {
+    const endTime = new Date(selectedRace.end_time).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    timingInfo += `<div style="margin-top: 2px; font-size: 12px; color: #94a3b8;">Ended: ${endTime}</div>`;
+  }
+  
+  raceInfoEl.innerHTML = `
+    <div style="font-weight: 600; color: #e2e8f0;">${selectedRace.name}</div>
+    <div style="margin-top: 4px; font-size: 12px; color: #94a3b8;">${selectedRace.distance_meters}m • ${scheduledDate}</div>
+    <div style="margin-top: 2px; font-size: 12px; color: #94a3b8;">Status: <span style="color: #10b981;">${selectedRace.status}</span></div>
+    ${timingInfo}
+  `;
 }
 
 // ===== End Race Start View Helper Functions =====

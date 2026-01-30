@@ -480,8 +480,16 @@ class RaceService:
         Returns:
             int: Number of participants
         """
-        count = db.query(Participant).filter_by(race_id=race_id).count()
-        return count
+        # Use the per-race participant table to get an accurate count
+        race = self.get_race(db, race_id)
+        table_name_value = getattr(race, "table_name", None)
+        table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
+        try:
+            total = db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"')).scalar() or 0
+            return int(total)
+        except Exception:
+            # Fallback to 0 if table not present or query fails
+            return 0
     
     def get_race_statistics(self, db: Session, race_id: str) -> dict:
         """

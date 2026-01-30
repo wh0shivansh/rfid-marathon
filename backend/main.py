@@ -523,6 +523,7 @@ async def delete_race(
 @app.post(f"{API_PREFIX}/race/{{race_id}}/start")
 async def start_race(
     race_id: str,
+    payload: dict = Body(default={}),
     db: Session = Depends(get_db_session),
     user=Depends(get_current_user)
 ):
@@ -530,7 +531,7 @@ async def start_race(
     Start a race:
     1. Set status to 'started'
     2. Ensure no other race is started
-    3. Set race start_time
+    3. Set race start_time (from frontend or use backend time)
     """
     from models import Race
 
@@ -544,10 +545,21 @@ async def start_race(
     table_name_value = getattr(race, "table_name", None)
     table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
 
-    # Assign start_time to any participants who were in 'grace' state before the official start
-    current_timestamp = get_current_timestamp_utc()
+    # Use start_time from frontend if provided, otherwise use backend time
+    start_time_str = payload.get('start_time')
+    if start_time_str:
+        try:
+            # Parse ISO timestamp from frontend
+            current_timestamp = parser.isoparse(start_time_str)
+        except Exception as e:
+            logger.warning(f"Failed to parse start_time from frontend: {e}, using backend time")
+            current_timestamp = get_current_timestamp_utc()
+    else:
+        current_timestamp = get_current_timestamp_utc()
+    
     timestamp_iso = current_timestamp.isoformat()
 
+    # Assign start_time to any participants who were in 'grace' state before the official start
     try:
         update_result = cast(CursorResult, db.execute(
             text(f'UPDATE "{table_name}" SET start_time = :ts WHERE status = :status AND start_time IS NULL'),
@@ -587,8 +599,17 @@ async def end_race(
     2. Set race end_time
     """
     try:
-        # End the race; this sets status to 'completed' (irreversible)
-        race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.COMPLETED)
+        # Get current time for end_time
+        end_timestamp = get_current_timestamp_utc()
+        
+        # Update race status and set end_time
+        race = race_service.update_race(
+            db=db,
+            race_id=race_id,
+            status=RaceStatus.COMPLETED,
+            end_time=end_timestamp
+        )
+        
         race_response = RaceResponse.model_validate(race, from_attributes=True)
         return create_success_response(race_response.model_dump())
     except ValidationError as ve:
