@@ -53,12 +53,12 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
             <div id="stat-registered" style="color: #a78bfa; font-size: 24px; font-weight: bold;">0</div>
           </div>
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
-            <div style="color: #60a5fa; font-size: 12px; text-transform: uppercase;">Grace</div>
-            <div id="stat-grace" style="color: #60a5fa; font-size: 24px; font-weight: bold;">0</div>
+            <div style="color: #60a5fa; font-size: 12px; text-transform: uppercase;">Started</div>
+            <div id="stat-started" style="color: #60a5fa; font-size: 24px; font-weight: bold;">0</div>
           </div>
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
-            <div style="color: #fbbf24; font-size: 12px; text-transform: uppercase;">Running</div>
-            <div id="stat-running" style="color: #fbbf24; font-size: 24px; font-weight: bold;">0</div>
+            <div style="color: #fbbf24; font-size: 12px; text-transform: uppercase;">Mid Point</div>
+            <div id="stat-mid" style="color: #fbbf24; font-size: 24px; font-weight: bold;">0</div>
           </div>
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #34d399; font-size: 12px; text-transform: uppercase;">Completed</div>

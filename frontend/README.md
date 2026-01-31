@@ -65,7 +65,7 @@ Secure, offline-first Electron desktop app for RFID-based marathon management.
 
 1. Copy `.env.template` to `.env` and fill values:
    - `VITE_API_BASE_URL`: Backend URL (e.g., `http://localhost:8001/api/v1`). **NOT listener 9090.**
-   - `FRONTEND_USERNAME` / `FRONTEND_PASSWORD`: Login credentials (hashed server-side on backend).
+   - `RFID_USERNAME` / `RFID_PASSWORD`: Login credentials (hashed server-side on backend).
    - `FRONTEND_RSA_PRIVATE_KEY_PATH`: Local private key for decrypting participant names.
 
 2. Install dependencies:

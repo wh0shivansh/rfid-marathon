@@ -70,7 +70,7 @@ const globalLoader = new GlobalLoader();
 const state = {
   view: "dashboard",
   config: secureApi.getConfig(),
-  auth: { token: null, expiresAt: 0 },
+  auth: { token: null, expiresAt: 0, username: "", password: "", remember: false },
   races: [],
   registrations: [],
   selectedRace: null,
@@ -132,9 +132,6 @@ let scoreboardSortDir = 'asc';
 
 // Race Start View state
 let raceStartSelectedRaceId = null;
-// Group selection removed; default to group 1 when starting
-let raceStartSelectedGroupNumber = 1;
-let raceStartTime = null;
 let raceStartPollingInterval = null;
 let durationClockInterval = null;
 
@@ -174,8 +171,8 @@ async function login() {
   // (replace 'Z' with '+00:00') to avoid parsing issues on the backend.
   const timestamp = new Date().toISOString().replace('Z', '+00:00');
   const nonce = generateNonce();
-  const { username, password } = state.config;
-  if (!username || !password) throw new Error("Missing FRONTEND_USERNAME/PASSWORD in .env");
+  const { username, password } = state.auth;
+  if (!username || !password) throw new Error("Missing username or password");
 
   const data = await apiRequest("/auth/login", {
     method: "POST",
@@ -190,7 +187,41 @@ async function login() {
 
 async function ensureAuth() {
   if (isTokenValid()) return;
+  if (!state.auth.username || !state.auth.password) {
+    throw new Error("Missing credentials");
+  }
   await login();
+}
+
+function loadStoredCredentials() {
+  const stored = secureApi.getStoredCredentials();
+  if (stored && stored.username && stored.password) {
+    state.auth.username = stored.username;
+    state.auth.password = stored.password;
+    return true;
+  }
+  return false;
+}
+
+function renderLogin() {
+  return `
+    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0f172a;">
+      <div style="width: 420px; background: #111827; padding: 32px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);">
+        <div style="font-size: 20px; font-weight: 600; color: #e5e7eb; margin-bottom: 8px;">RFID Marathon</div>
+        <div style="font-size: 13px; color: #9ca3af; margin-bottom: 24px;">Sign in to continue</div>
+        <form id="login-form">
+          <label style="display:block; font-size: 12px; color:#94a3b8; margin-bottom:6px;">USERNAME</label>
+          <input id="login-username" type="text" required style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid #1f2937; background:#0b1220; color:#e2e8f0; margin-bottom:16px;" />
+          <label style="display:block; font-size: 12px; color:#94a3b8; margin-bottom:6px;">PASSWORD</label>
+          <input id="login-password" type="password" required style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid #1f2937; background:#0b1220; color:#e2e8f0; margin-bottom:16px;" />
+          <label style="display:flex; align-items:center; gap:8px; font-size: 12px; color:#94a3b8; margin-bottom:20px;">
+            <input id="login-remember" type="checkbox" /> Remember Me
+          </label>
+          <button type="submit" style="width:100%; padding:10px 12px; border-radius:8px; border:none; background:#3b82f6; color:white; font-weight:600; cursor:pointer;">Login</button>
+        </form>
+      </div>
+    </div>
+  `;
 }
 
 function showStartGroupStatus(message, type = 'info') {
@@ -506,6 +537,7 @@ function renderHeader() {
           <div id="ws-status" style="color: #ef4444; font-size: 14px;">⚪ Inactive</div>
         </div> 
         `: ``}
+        <button class="ghost" id="logout-btn">Logout</button>
         <button class="ghost" id="refresh-btn">Refresh races</button>
       </div>
     </div>
@@ -518,6 +550,38 @@ function renderRegister() {
 }
 
 async function render() {
+  if (state.view === "login") {
+    app.innerHTML = renderLogin();
+    const form = document.getElementById("login-form");
+    if (form) {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const username = document.getElementById("login-username").value.trim();
+        const password = document.getElementById("login-password").value;
+        const remember = document.getElementById("login-remember").checked;
+        state.auth.username = username;
+        state.auth.password = password;
+        state.auth.remember = remember;
+        try {
+          await ensureAuth();
+          if (remember) {
+            secureApi.setStoredCredentials(username, password);
+          } else {
+            secureApi.clearStoredCredentials();
+          }
+          state.view = "dashboard";
+          await fetchRaces();
+          await fetchDashboardData();
+          render();
+        } catch (err) {
+          console.error(err);
+          showToast(`Login failed: ${err.message}`, 'error');
+        }
+      });
+    }
+    return;
+  }
+
   // Cleanup polling when leaving race-start view
   // Inside document.querySelectorAll(".nav-btn").forEach((btn) => { ... })
   if (state.view !== "race-start" && raceStartPollingInterval) {
@@ -596,6 +660,21 @@ async function render() {
       render();
     });
   });
+
+  const logoutBtn = document.getElementById("logout-btn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", () => {
+      state.auth.token = null;
+      state.auth.expiresAt = 0;
+      state.auth.username = "";
+      state.auth.password = "";
+      state.auth.remember = false;
+      window.authToken = null;
+      secureApi.clearStoredCredentials();
+      state.view = "login";
+      render();
+    });
+  }
 
   const refreshBtn = document.getElementById("refresh-btn");
   if (refreshBtn) {
@@ -1505,12 +1584,19 @@ async function deleteCandidate(candidateId) {
 
 async function bootstrap() {
   try {
+    const hasStored = loadStoredCredentials();
+    if (!hasStored) {
+      state.view = "login";
+      render();
+      return;
+    }
     await ensureAuth();
     await fetchRaces();
     await fetchDashboardData();
   } catch (err) {
     console.error(err);
     showToast(`Bootstrap failed: ${err.message}`, 'error');
+    state.view = "login";
   }
   render();
 }
@@ -1861,12 +1947,15 @@ function updateRaceStartStatistics(participants) {
   
   const registeredEl = document.getElementById('stat-registered');
   if (registeredEl) registeredEl.textContent = registered;
-  
-  const graceEl = document.getElementById('stat-grace');
-  if (graceEl) graceEl.textContent = grace;
-  
-  const runningEl = document.getElementById('stat-running');
-  if (runningEl) runningEl.textContent = running;
+  // Started: treat as participants that are in grace or running
+  const startedCount = grace + running;
+  const startedEl = document.getElementById('stat-started');
+  if (startedEl) startedEl.textContent = startedCount;
+
+  // Mid point: count participants who have a mid_time recorded
+  const midCount = participants.reduce((acc, x) => acc + (x.mid_time ? 1 : 0), 0);
+  const midEl = document.getElementById('stat-mid');
+  if (midEl) midEl.textContent = midCount;
   
   const completedEl = document.getElementById('stat-completed');
   if (completedEl) completedEl.textContent = completed;

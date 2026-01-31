@@ -26,6 +26,7 @@
   const participantsWithDurationUnsorted = filteredParticipants
     .map(p => {
       const startTime = p.start_time ? new Date(p.start_time) : null;
+      const midTime = p.mid_time ? new Date(p.mid_time) : null;
       const endTime = p.end_time ? new Date(p.end_time) : null;
       
       let durationMs = null;
@@ -82,10 +83,16 @@
         case 'gender': return (item.gender || '').toString().toLowerCase();
         case 'category': return (item.category || '').toString().toLowerCase();
         case 'startTime': return item.startTime ? item.startTime.getTime() : Number.MAX_SAFE_INTEGER;
+        case 'midTime': return item.midTime ? item.midTime.getTime() : Number.MAX_SAFE_INTEGER;
         case 'endTime': return item.endTime ? item.endTime.getTime() : Number.MAX_SAFE_INTEGER;
         case 'durationMs': return item.durationMs === null ? Number.MAX_SAFE_INTEGER : item.durationMs;
         case 'rank': {
-          return Number(item.rank) || Number.MAX_SAFE_INTEGER;
+          // Prefer assigned rank on item; fall back to baseline map using stable keys
+          const r = Number(item.rank);
+          if (!Number.isNaN(r) && r > 0) return r;
+          const stableKey = item.id ?? (item.rfid || item.rfid_tag || item.encrypted_name);
+          const mapped = baselineRankMap.get(stableKey);
+          return mapped ?? Number.MAX_SAFE_INTEGER;
         }
         default: return item[key];
       }
@@ -154,7 +161,7 @@
       ` : `
         <!-- Race Summary Card -->
         <div style="margin-bottom: 24px; padding: 24px; background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 8px; border: 1px solid #334155;">
-          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px;">
             <div style="text-align: center;">
               <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Total Participants</div>
               <div style="color: #e2e8f0; font-size: 32px; font-weight: 700;">${participantsWithDuration.length}</div>
@@ -162,6 +169,13 @@
             <div style="text-align: center;">
               <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Finished</div>
               <div style="color: #22c55e; font-size: 32px; font-weight: 700;">${participantsWithDuration.filter(p => p.durationMs !== null).length}</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Start Time</div>
+              <div style="color: #e2e8f0; font-size: 32px; font-weight: 600;">${(() => {
+                const race = races.find(r => String(r.id) === String(selectedRaceId));
+                return race ? `${new Date(race.start_time).toLocaleTimeString()}` : 'N/A';
+              })()}</div>
             </div>
             <div style="text-align: center;">
               <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Fastest Time</div>
@@ -195,7 +209,7 @@
                   <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Gender <button class="scoreboard-sort-toggle" data-key="gender" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                   <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Category <button class="scoreboard-sort-toggle" data-key="category" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                   <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Performance</th>
-                  <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Start Time <button class="scoreboard-sort-toggle" data-key="startTime" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
+                  <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Mid Time <button class="scoreboard-sort-toggle" data-key="midTime" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                   <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">End Time <button class="scoreboard-sort-toggle" data-key="endTime" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                   <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">⏱️ Duration <button class="scoreboard-sort-toggle" data-key="durationMs" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                 </tr>
@@ -203,7 +217,8 @@
               <tbody>
                 ${participantsWithDuration.map((p, index) => {
                   const displayName = p.decryptedName || p.name || (p.encrypted_name ? p.encrypted_name.substring(0, 10) + "..." : 'Unknown');
-                  const rank = p.durationMs !== null ? index + 1 : '-';
+                  const stableKey = p.id ?? (p.rfid || p.rfid_tag || p.encrypted_name);
+                  const rank = p.rank ?? baselineRankMap.get(stableKey) ?? (p.durationMs !== null ? index + 1 : '-');
                   const isTop3 = p.durationMs !== null && index < 3;
                   const medalColor = index === 0 ? '#fbbf24' : index === 1 ? '#94a3b8' : index === 2 ? '#cd7f32' : '';
                   const perf = getPerformanceLabel(p.age, p.durationMs);
@@ -220,7 +235,7 @@
                       <td style="padding: 16px; text-align: center; color: #cbd5e1; font-size: 14px;">${p.gender === 'M' ? 'M' : p.gender === 'F' ? 'F' : (p.gender || 'O')}</td>
                       <td style="padding: 16px; text-align: center; color: #cbd5e1; font-size: 14px;">${p.category || '-'}</td>
                       <td style="padding: 16px; text-align: center; color: ${perfColor}; font-size: 13px; font-weight: 600;">${perf}</td>
-                      <td style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">${p.startTime ? new Date(p.startTime).toLocaleTimeString() : 'N/A'}</td>
+                      <td style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">${p.midTime ? new Date(p.midTime).toLocaleTimeString() : 'N/A'}</td>
                       <td style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">${p.endTime ? new Date(p.endTime).toLocaleTimeString() : 'N/A'}</td>
                       <td style="padding: 16px; text-align: center; color: ${isTop3 ? medalColor : '#22c55e'}; font-size: ${isTop3 ? '16px' : '15px'}; font-weight: ${isTop3 ? '700' : '600'}; font-family: monospace;">
                         ${p.formattedDuration}
