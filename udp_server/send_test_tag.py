@@ -14,8 +14,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-HOST = os.getenv("SEND_HOST", "192.168.1.11")
-PORT = int(os.getenv("SEND_PORT", "6000"))
+HOST = os.getenv("TEST_HOST", "192.168.1.11")
+PORT = int(os.getenv("TEST_PORT", "6000"))
 HOST = "127.0.0.1"
 PORT = 6000
 
