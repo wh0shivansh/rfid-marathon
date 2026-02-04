@@ -542,7 +542,7 @@ class MigrationManager:
             session.execute(text("""
                 ALTER TABLE races
                 ADD CONSTRAINT check_race_status
-                CHECK (status IN ('created', 'active', 'started', 'completed'));
+                CHECK (status IN ('created', 'started', 'completed'));
             """))
 
             session.commit()

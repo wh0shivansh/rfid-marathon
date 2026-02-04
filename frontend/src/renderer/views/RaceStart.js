@@ -47,14 +47,10 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
       ${selectedRaceId ? `
       <div class="panel" style="margin-top: 24px;">
         <div class="panel-header">Race Statistics</div>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 16px;">
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 16px;">
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #a78bfa; font-size: 12px; text-transform: uppercase;">Registered</div>
             <div id="stat-registered" style="color: #a78bfa; font-size: 24px; font-weight: bold;">0</div>
-          </div>
-          <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
-            <div style="color: #60a5fa; font-size: 12px; text-transform: uppercase;">Started</div>
-            <div id="stat-started" style="color: #60a5fa; font-size: 24px; font-weight: bold;">0</div>
           </div>
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #fbbf24; font-size: 12px; text-transform: uppercase;">Mid Point</div>

@@ -147,7 +147,6 @@ TIMESTAMP_PRECISION: Final[int] = 3
 class RaceStatus(str, Enum):
     """Enumeration of race statuses"""
     CREATED = "created"           # Race created, not started
-    ACTIVE = "active"             # Race is currently active (only one can be active at a time)
     STARTED = "started"           # Race started by admin, participants are running
     COMPLETED = "completed"       # Race completed, all participants finished
 
@@ -155,10 +154,9 @@ class RaceStatus(str, Enum):
 # Defines allowed transitions between race statuses
 # Format: {current_status: [allowed_next_statuses]}
 RACE_STATUS_TRANSITIONS: Final[dict] = {
-    "created": ["active", "started", "completed"],  # Can activate, start, or complete from created
-    "active": ["created", "started", "completed"],  # Can rollback to created (system), start, or complete
-    "started": ["completed"],                        # Can only complete once started
-    "completed": []                                   # Completed is irreversible (no transitions allowed)
+    "created": ["started", "completed"],  # Can start, or complete from created
+    "started": ["completed"],             # Can only complete once started
+    "completed": []                       # Completed is irreversible (no transitions allowed)
 }
     
 # Race distance limits (meters)

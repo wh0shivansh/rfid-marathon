@@ -244,7 +244,7 @@ async def get_race_diagnostics(db: Session = Depends(get_db_session), _user=Depe
                 text(f'SELECT COUNT(*) FROM "{table_name}" WHERE status = :status'),
                 {"status": "registered"}
             ).scalar() or 0
-            grace_count = db.execute(
+            running_count = db.execute(
                 text(f'SELECT COUNT(*) FROM "{table_name}" WHERE status = :status'),
                 {"status": "grace"}
             ).scalar() or 0
@@ -258,7 +258,7 @@ async def get_race_diagnostics(db: Session = Depends(get_db_session), _user=Depe
             ).scalar() or 0
         except Exception as e:
             logger.debug(f"Could not query participant status for race {race_id}: {e}")
-            registered_count = grace_count = running_count = completed_count = 0
+            registered_count = running_count = running_count = completed_count = 0
         
         race_info.append({
             "id": race_id,
@@ -267,7 +267,7 @@ async def get_race_diagnostics(db: Session = Depends(get_db_session), _user=Depe
             "scheduled_date": race.scheduled_date.isoformat() if race.scheduled_date is not None else None,
             "participant_counts": {
                 "registered": int(registered_count),
-                "grace": int(grace_count),
+                "grace": int(running_count),
                 "running": int(running_count),
                 "completed": int(completed_count)
             }
@@ -562,13 +562,13 @@ async def start_race(
     # Assign start_time to any participants who were in 'grace' state before the official start
     try:
         update_result = cast(CursorResult, db.execute(
-            text(f'UPDATE "{table_name}" SET start_time = :ts WHERE status = :status AND start_time IS NULL'),
-            {"ts": timestamp_iso, "status": "grace"}
+            text(f'UPDATE "{table_name}" SET start_time = :ts WHERE start_time IS NULL'),
+            {"ts": timestamp_iso, "status": "running"}
         ))
-        grace_count = update_result.rowcount if update_result.rowcount is not None else 0
+        running_count = update_result.rowcount if update_result.rowcount is not None else 0
         db.commit()
     except Exception:
-        grace_count = 0
+        running_count = 0
         db.rollback()
 
     # Update race status to STARTED and set race start_time
@@ -580,9 +580,9 @@ async def start_race(
     )
 
     return create_success_response({
-        "message": f"Race started successfully, {grace_count} participants assigned start time",
+        "message": f"Race started successfully, {running_count} participants assigned start time",
         "race": RaceResponse.from_orm(race).dict(),
-        "rfids_started": grace_count,
+        "rfids_started": running_count,
         "start_time_assigned": timestamp_iso
     })
 
@@ -1728,10 +1728,10 @@ async def record_rfid_end_from_listener(
 #             text(f'UPDATE "{table_name}" SET start_time = :ts WHERE status = :status AND start_time IS NULL'),
 #             {"ts": timestamp_iso, "status": "grace"}
 #         ))
-#         grace_count = update_result.rowcount if update_result.rowcount is not None else 0
+#         running_count = update_result.rowcount if update_result.rowcount is not None else 0
 #         db.commit()
         
-#         # logger.info(f"✓ Updated {grace_count} grace status participants with start_time={timestamp_iso}")
+#         # logger.info(f"✓ Updated {running_count} grace status participants with start_time={timestamp_iso}")
         
 #         # Update race status from 'created' to 'started' AND race status from 'created' to 'started'
 #         db.execute(
@@ -1744,10 +1744,10 @@ async def record_rfid_end_from_listener(
         
 #         response = RaceStartResponse(
 #             success=True,
-#             message=f"Race started, {grace_count} participants assigned start time",
+#             message=f"Race started, {running_count} participants assigned start time",
 #             race_id=race_id,
 #             group_number=1,
-#             rfids_started=grace_count,
+#             rfids_started=running_count,
 #             start_time_assigned=timestamp_iso
 #         )
         

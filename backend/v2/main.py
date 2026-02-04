@@ -287,7 +287,6 @@ async def get_transition_diagnostics(_user=Depends(get_current_user)):
         "transitions": RACE_STATUS_TRANSITIONS,
         "statuses": {
             "CREATED": RaceStatus.CREATED.value,
-            "ACTIVE": RaceStatus.ACTIVE.value,
             "STARTED": RaceStatus.STARTED.value,
             "COMPLETED": RaceStatus.COMPLETED.value
         }
@@ -508,12 +507,12 @@ async def delete_race(
     db: Session = Depends(get_db_session),
     user=Depends(get_current_user)
 ):
-    """Delete a race. Cannot delete active races."""
+    """Delete a race. Cannot delete started races."""
     race = race_service.get_race(db=db, race_id=race_id)
     
     # Avoid SQLAlchemy boolean expression in Python conditional by comparing to the enum value
-    if getattr(race, "status", None) == RaceStatus.ACTIVE.value:
-        raise ConflictError("Cannot delete an active race. End the race first.")
+    if getattr(race, "status", None) == RaceStatus.STARTED.value:
+        raise ConflictError("Cannot delete a started race. End the race first.")
     
     # Delete the race (race_service should handle dropping participant table)
     race_service.delete_race(db=db, race_id=race_id)
@@ -530,16 +529,16 @@ async def start_race(
 ):
     """
     Start a race:
-    1. Set status to 'active'
-    2. Ensure no other race is active
+    1. Set status to 'started'
+    2. Ensure no other race is started
     3. Assign a unified start_time to all participants (from frontend or use backend time)
     """
     from models import Race
 
-    # Prevent multiple started/active races at the same time
-    existing_race = db.query(Race).filter(Race.status.in_([RaceStatus.ACTIVE, RaceStatus.STARTED])).first()
+    # Prevent multiple started races at the same time
+    existing_race = db.query(Race).filter(Race.status == RaceStatus.STARTED).first()
     if existing_race and str(existing_race.id) != race_id:
-        raise ConflictError(f"Another race '{existing_race.name}' is already active. Only one race can be active at a time.")
+        raise ConflictError(f"Another race '{existing_race.name}' is already started. Only one race can be started at a time.")
 
     # Ensure race exists and determine its participant table
     race = race_service.get_race(db=db, race_id=race_id)
@@ -560,8 +559,8 @@ async def start_race(
     
     timestamp_iso = current_timestamp.isoformat()
 
-    # Promote race to ACTIVE (also assigns a unified start_time internally)
-    race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.ACTIVE)
+    # Promote race to STARTED (also assigns a unified start_time internally)
+    race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.STARTED)
 
     # Override start_time if a frontend timestamp was provided, and propagate to participants
     grace_count = 0
@@ -590,6 +589,7 @@ async def start_race(
 @app.post(f"{API_PREFIX}/race/{{race_id}}/end")
 async def end_race(
     race_id: str,
+    payload: dict = Body(default={}),
     db: Session = Depends(get_db_session),
     user=Depends(get_current_user)
 ):
@@ -599,15 +599,26 @@ async def end_race(
     2. Set race end_time
     """
     try:
-        # Get current time for end_time
-        end_timestamp = get_current_timestamp_utc()
+        # Use start_time from frontend if provided, otherwise use backend time
+        end_time_str = payload.get('end_time')
+        if end_time_str:
+            try:
+                # Parse ISO timestamp from frontend
+                current_timestamp = parser.isoparse(end_time_str)
+            except Exception as e:
+                logger.warning(f"Failed to parse end_time from frontend: {e}, using backend time")
+                current_timestamp = get_current_timestamp_utc()
+        else:
+            current_timestamp = get_current_timestamp_utc()
+        
+        timestamp_iso = current_timestamp.isoformat()
         
         # Update race status and set end_time
         race = race_service.update_race(
             db=db,
             race_id=race_id,
             status=RaceStatus.COMPLETED,
-            end_time=end_timestamp
+            end_time=timestamp_iso
         )
         
         race_response = RaceResponse.model_validate(race, from_attributes=True)
@@ -630,12 +641,11 @@ async def update_race_status_endpoint(
 ):
     """
     Unified status update endpoint for races.
-    Accepts JSON payload: {"status": "created"|"active"|"started"|"completed"}
+    Accepts JSON payload: {"status": "created"|"started"|"completed"}
 
     - Setting to `created` is treated as a system rollback and will be executed with `system=True`.
-    - Setting to `active` will promote the race to active and demote any existing active race.
-    - Setting to `started` will set the race to started (demoting any existing active race first).
-    - Setting to `completed` will complete an active race (irreversible).
+    - Setting to `started` will set the race to started (demoting any existing started race first).
+    - Setting to `completed` will complete a started race (irreversible).
     """
     desired_status = payload.get("status")
     if not desired_status:
@@ -737,13 +747,15 @@ def _fetch_participants_for_race(db: Session, race, fernet_mgr, rsa_mgr, include
     if include_timing:
         query = f'''
             SELECT id, race_id, rfid_tag, encrypted_name, age, gender, category, registered_at, encryption_key_id,
-                   start_time, mid_time, end_time, status
+                   start_time, mid_time, end_time, status 
             FROM "{table_name}"
+            ORDER BY rfid_tag ASC
         '''
     else:
         query = f'''
             SELECT id, race_id, rfid_tag, encrypted_name, age, gender, category, registered_at, encryption_key_id 
             FROM "{table_name}"
+            ORDER BY rfid_tag ASC
         '''
     
     try:
@@ -1117,7 +1129,7 @@ async def rfid_bulk_upload(
     """
     Bulk RFID upload endpoint for buffered proxy data.
 
-    - Resolves the active race (status = 'active')
+    - Resolves the started race (status = 'started')
     - Updates mid_time for reader_id=2 and end_time for reader_id=3
     - Does not require start_time to exist
     """
@@ -1129,13 +1141,13 @@ async def rfid_bulk_upload(
                 WHERE status = :status
                 LIMIT 1
             """),
-            {"status": RaceStatus.ACTIVE.value}
+            {"status": RaceStatus.STARTED.value}
         ).fetchone()
 
         if not race_row:
             return create_success_response({
                 "success": False,
-                "message": "No active race found",
+                "message": "No started race found",
                 "processed": 0,
                 "updated_mid": 0,
                 "updated_end": 0
@@ -1148,16 +1160,19 @@ async def rfid_bulk_upload(
         processed = 0
         updated_mid = 0
         updated_end = 0
+        logger.info(f"[RFID_BULK] Processing {len(payload.entries)} entries for race {race_name} (table: {table_name})")
 
         for entry in payload.entries:
             processed += 1
             rfid_tag = entry.rfid.upper()
+            logger.info(f"[RFID_BULK] Entry {processed}: rfid={rfid_tag}, reader_id={entry.reader_id}, timestamp={entry.timestamp}")
 
             try:
                 event_time = parser.isoparse(entry.timestamp)
                 if event_time.tzinfo is None:
                     event_time = event_time.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
-            except Exception:
+            except Exception as ts_err:
+                logger.warning(f"[RFID_BULK] Failed to parse timestamp {entry.timestamp}: {ts_err}")
                 event_time = get_current_timestamp_utc()
 
             if entry.reader_id == 2:
@@ -1165,17 +1180,27 @@ async def rfid_bulk_upload(
                     text(f'UPDATE "{table_name}" SET mid_time = :ts WHERE rfid_tag = :rfid AND mid_time IS NULL'),
                     {"ts": event_time, "rfid": rfid_tag}
                 ))
-                if result.rowcount:
-                    updated_mid += int(result.rowcount)
+                rowcount = int(result.rowcount) if result.rowcount else 0
+                if rowcount:
+                    updated_mid += rowcount
+                    logger.info(f"[RFID_BULK] Updated mid_time for RFID {rfid_tag} (+{rowcount})")
+                else:
+                    logger.debug(f"[RFID_BULK] No update for mid_time RFID {rfid_tag} (already set or not found)")
             elif entry.reader_id == 3:
                 result = cast(CursorResult, db.execute(
                     text(f'UPDATE "{table_name}" SET end_time = :ts WHERE rfid_tag = :rfid AND end_time IS NULL'),
                     {"ts": event_time, "rfid": rfid_tag}
                 ))
-                if result.rowcount:
-                    updated_end += int(result.rowcount)
+                rowcount = int(result.rowcount) if result.rowcount else 0
+                if rowcount:
+                    updated_end += rowcount
+                    logger.info(f"[RFID_BULK] Updated end_time for RFID {rfid_tag} (+{rowcount})")
+                else:
+                    # Log at INFO so operators can see when expected updates don't happen
+                    logger.info(f"[RFID_BULK] No update for end_time RFID {rfid_tag} (already set or not found) in table {table_name}")
             else:
                 # reader_id == 1 (start) or unknown: ignore for v2 timing
+                logger.debug(f"[RFID_BULK] Skipping reader_id {entry.reader_id} (start or unknown)")
                 continue
 
         db.commit()
@@ -1201,8 +1226,8 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
     Handle start line RFID hit.
     
     Logic:
-    1. If race NOT active: no timing updates (legacy grace/status kept but not relied upon)
-    2. If race IS active: set status='running' without altering start_time
+    1. If race NOT started: no timing updates (legacy grace/status kept but not relied upon)
+    2. If race IS started: set status='running' without altering start_time
     
     Args:
         rfid_tag: RFID tag ID
@@ -1210,7 +1235,7 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
         hit_timestamp: ISO timestamp from proxy/listener when RFID was detected
     
     Flow:
-    1. Find the active race (status = 'active')
+    1. Find the started race (status = 'started')
     2. Find the participant with this RFID
     3. Apply appropriate logic based on race status
     """
@@ -1232,20 +1257,20 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
             current_time = get_current_timestamp_utc()
             # logger.debug(f"[RFID_START] No proxy timestamp provided; using backend time: {current_time}")
         
-        # Find the active race
+        # Find the started race
         query = text("""
             SELECT id, name, table_name, scheduled_date, status 
             FROM races 
             WHERE status = :status
             LIMIT 1
         """)
-        race_row = db.execute(query, {"status": RaceStatus.ACTIVE.value}).fetchone()
+        race_row = db.execute(query, {"status": RaceStatus.STARTED.value}).fetchone()
         
         if not race_row:
-            logger.warning(f"[RFID_START] No active race found")
+            logger.warning(f"[RFID_START] No started race found")
             response = RFIDHitResponse(
                 success=False,
-                message="No active race found",
+                message="No started race found",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1289,7 +1314,7 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
             )
             return create_success_response(response.model_dump())
         
-        # For ACTIVE races, mark status as running but do not alter start_time
+        # For STARTED races, mark status as running but do not alter start_time
         if current_status != "running":
             db.execute(
                 text(f'UPDATE "{table_name}" SET status = :status WHERE id = :pid'),
@@ -1318,7 +1343,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
     Handle end line RFID hit.
     
     Logic:
-    - Record end_time for the active race regardless of start_time
+    - Record end_time for the started race regardless of start_time
     - Do not require runner to be in 'running' status
     
     Args:
@@ -1327,7 +1352,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         hit_timestamp: ISO timestamp from proxy/listener when RFID was detected
     
     Flow:
-    1. Find active race (status='active')
+    1. Find started race (status='started')
     2. Find the participant with this RFID
     3. Check if status is 'running'
     4. If yes: Update end_time and set status to 'completed'
@@ -1352,20 +1377,20 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
             current_time = get_current_timestamp_utc()
             logger.debug(f"[RFID_END] No proxy timestamp provided; using backend time: {current_time}")
         
-        # Find the active race
+        # Find the started race
         query = text("""
             SELECT id, name, table_name, scheduled_date, status 
             FROM races 
             WHERE status = :status
             LIMIT 1
         """)
-        race_row = db.execute(query, {"status": RaceStatus.ACTIVE.value}).fetchone()
+        race_row = db.execute(query, {"status": RaceStatus.STARTED.value}).fetchone()
         
         if not race_row:
-            logger.warning(f"[RFID_END] No active race found")
+            logger.warning(f"[RFID_END] No started race found")
             response = RFIDHitResponse(
                 success=False,
-                message="No active race found",
+                message="No started race found",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1375,7 +1400,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         table_name_value = getattr(race_row, "table_name", None)
         table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race_name}_participants"
         
-        # logger.info(f"[RFID_END] Found active race: {race_name} (id={race_id}) - table: {table_name}")
+        # logger.info(f"[RFID_END] Found started race: {race_name} (id={race_id}) - table: {table_name}")
         
         # Find the participant with this RFID
         participant_row = db.execute(
@@ -1387,7 +1412,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
             logger.warning(f"[RFID_END] RFID {rfid_tag} not found in race {race_name}")
             response = RFIDHitResponse(
                 success=False,
-                message="Participant not found in active race",
+                message="Participant not found in started race",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1439,7 +1464,7 @@ async def _handle_rfid_mid(rfid_tag: str, db: Session, hit_timestamp: Optional[s
     Handle mid-point RFID hit.
 
     Logic:
-    - Record mid_time for the active race regardless of start_time
+    - Record mid_time for the started race regardless of start_time
     """
     try:
         if hit_timestamp:
@@ -1459,13 +1484,13 @@ async def _handle_rfid_mid(rfid_tag: str, db: Session, hit_timestamp: Optional[s
             WHERE status = :status
             LIMIT 1
         """)
-        race_row = db.execute(query, {"status": RaceStatus.ACTIVE.value}).fetchone()
+        race_row = db.execute(query, {"status": RaceStatus.STARTED.value}).fetchone()
 
         if not race_row:
-            logger.warning(f"[RFID_MID] No active race found")
+            logger.warning(f"[RFID_MID] No started race found")
             response = RFIDHitResponse(
                 success=False,
-                message="No active race found",
+                message="No started race found",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1482,7 +1507,7 @@ async def _handle_rfid_mid(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         if not participant_row:
             response = RFIDHitResponse(
                 success=False,
-                message="Participant not found in active race",
+                message="Participant not found in started race",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1531,7 +1556,7 @@ async def record_rfid_start_from_listener(
     
      Logic:
      - Do not assign start_time from RFID hits (start_time is race-derived)
-     - Update status to 'running' only if race is active
+     - Update status to 'running' only if race is started
     """  
     rfid_tag_raw = payload.rfid_tag or getattr(payload, "rfid", None)
     if not rfid_tag_raw:
@@ -1545,20 +1570,20 @@ async def record_rfid_start_from_listener(
         # Get today's date
         today = datetime.utcnow().date()
         
-        # Find active race only
+        # Find started race only
         query = text("""
             SELECT id, name, table_name, scheduled_date, status 
             FROM races 
             WHERE status = :status
             LIMIT 1
         """)
-        race_row = db.execute(query, {"status": RaceStatus.ACTIVE.value}).fetchone()
+        race_row = db.execute(query, {"status": RaceStatus.STARTED.value}).fetchone()
         
         if not race_row:
-            logger.warning(f"[RFID_START] No active race found")
+            logger.warning(f"[RFID_START] No started race found")
             response = RFIDHitResponse(
                 success=False,
-                message="No active race found",
+                message="No started race found",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1588,10 +1613,10 @@ async def record_rfid_start_from_listener(
         participant_id = str(getattr(participant_row, "id"))
         current_status = getattr(participant_row, "status", "registered")
 
-        if race_status != RaceStatus.ACTIVE.value:
+        if race_status != RaceStatus.STARTED.value:
             response = RFIDHitResponse(
                 success=True,
-                message=f"Race not active; keeping status '{current_status}'",
+                message=f"Race not started; keeping status '{current_status}'",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1632,7 +1657,7 @@ async def record_rfid_end_from_listener(
     Flow:
     1. Listener receives end hit from end hub
     2. Listener forwards immediately to this endpoint
-    3. Backend finds the active race for this RFID
+    3. Backend finds the started race for this RFID
     4. Backend assigns endTIME with current server timestamp (start_time not required)
     """
     
@@ -1652,13 +1677,13 @@ async def record_rfid_end_from_listener(
                 WHERE status = :status
                 LIMIT 1
             """),
-            {"status": RaceStatus.ACTIVE.value}
+            {"status": RaceStatus.STARTED.value}
         ).fetchone()
 
         if not race_row:
             response = RFIDHitResponse(
                 success=False,
-                message="No active race found",
+                message="No started race found",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1675,7 +1700,7 @@ async def record_rfid_end_from_listener(
         if not row:
             response = RFIDHitResponse(
                 success=False,
-                message="Participant not found in active race",
+                message="Participant not found in started race",
                 rfid_tag=rfid_tag
             )
             return create_success_response(response.model_dump())
@@ -1716,151 +1741,6 @@ async def record_rfid_end_from_listener(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to record end time"
         )
-
-
-# ============================================================================
-# RACE GROUP MANAGEMENT ENDPOINTS
-# ============================================================================
-
-# @app.post(f"{API_PREFIX}/race/{{race_id}}/start")
-# async def start_race_group(
-#     race_id: str,
-#     db: Session = Depends(get_db_session),
-#     _user=Depends(get_current_user)
-# ):
-#     """
-#     Admin endpoint to start a race and all registered runners.
-    
-#     Workflow:
-#     1. Set race status from 'created' to 'started'
-#     2. Find all participants with status='grace' in the per-race table
-#     3. Set start_time to current time and status remains 'grace'
-#     4. New RFIDs after this will have status set directly to 'running'
-#     """
-#     try:
-#         # Verify race exists
-#         race = race_service.get_race(db=db, race_id=race_id)
-#         table_name_value = getattr(race, "table_name", None)
-#         table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
-        
-#         current_timestamp = get_current_timestamp_utc()
-#         timestamp_iso = current_timestamp.isoformat()
-        
-#         # Update all participants with status='grace' to set their start_time
-#         # These are participants who were scanned at start line before race started
-#         update_result = cast(CursorResult, db.execute(
-#             text(f'UPDATE "{table_name}" SET start_time = :ts WHERE status = :status AND start_time IS NULL'),
-#             {"ts": timestamp_iso, "status": "grace"}
-#         ))
-#         grace_count = update_result.rowcount if update_result.rowcount is not None else 0
-#         db.commit()
-        
-#         # logger.info(f"✓ Updated {grace_count} grace status participants with start_time={timestamp_iso}")
-        
-#         # Update race status from 'created' to 'started' AND race status from 'created' to 'started'
-#         db.execute(
-#             text('UPDATE races SET status = :status WHERE id = :race_id'),
-#             {"status": "started", "race_id": race_id}
-#         )
-#         db.commit()
-        
-#         # logger.info(f"✓ Updated race {race_id} status to 'started'")
-        
-#         response = RaceStartResponse(
-#             success=True,
-#             message=f"Race started, {grace_count} participants assigned start time",
-#             race_id=race_id,
-#             group_number=1,
-#             rfids_started=grace_count,
-#             start_time_assigned=timestamp_iso
-#         )
-        
-#         return create_success_response(response.model_dump())
-        
-#     except NotFoundError as e:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail=str(e)
-#         )
-#     except Exception as e:
-#         logger.error(f"✗ Error starting race: {e}")
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to start race"
-#         )
-# 
-#
-# # ============================================================================
-# # RACE GROUP QUERY ENDPOINTS
-# # ============================================================================
-# 
-# @app.get(f"{API_PREFIX}/races/{{race_id}}/groups")
-# async def get_race_groups(
-#     race_id: str,
-#     db: Session = Depends(get_db_session),
-#     _user=Depends(get_current_user)
-# ):
-#     """
-#     Get all groups for a race.
-    
-#     Returns:
-#         List of groups with their RFIDs and status
-#     """    
-#     race_state_manager = get_race_state_manager()
-    
-#     try:
-#         groups = race_state_manager.get_all_groups(race_id)
-        
-#         if not groups:
-#             return create_success_response([])
-        
-#         return create_success_response(groups)
-        
-#     except Exception as e:
-#         logger.error(f"✗ Error fetching races: {e}")
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to fetch races"
-#         )
-
-
-# @app.get(f"{API_PREFIX}/races/{{race_id}}/groups/{{group_number:int}}")
-# async def get_race_group(
-#     race_id: str,
-#     group_number: int,
-#     db: Session = Depends(get_db_session),
-#     _user=Depends(get_current_user)
-# ):
-#     """
-#     Get details for a specific group.
-    
-#     Returns:
-#         Group details including RFIDs, timestamps, and status
-#     """        
-#     try:
-#         groups = race_state_manager.get_all_groups(race_id)
-#         group = next((g for g in groups if g['group_number'] == group_number), None)
-        
-#         if not group:
-#             raise NotFoundError(
-#                 "Race",
-#                 f"Race={race_id}, Group={group_number}"
-#             )
-        
-#         return create_success_response(group)
-        
-#     except NotFoundError:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail=f"Group {group_number} not found"
-#         )
-#     except Exception as e:
-#         logger.error(f"✗ Error fetching group details: {e}")
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to fetch group details"
-#         )
-
 
 # ============================================================================
 # CRYPTOGRAPHY ENDPOINTS

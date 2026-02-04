@@ -46,7 +46,7 @@ class TimingPoint(Enum):
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
 BACKEND_BULK_ENDPOINT = os.getenv("BACKEND_BULK_ENDPOINT", "/api/v2/rfid/bulk")
 LISTENER_PORT = int(os.getenv("LISTENER_PORT", 9090))
-RFID_BULK_FLUSH_SECONDS = int(os.getenv("RFID_BULK_FLUSH_SECONDS", 30))
+RFID_BULK_FLUSH_SECONDS = int(os.getenv("RFID_BULK_FLUSH_SECONDS", 5))
 
 logger.info(f"[CONFIG] Backend URL: {BACKEND_URL}")
 logger.info(f"[CONFIG] Listener Port: {LISTENER_PORT}")
@@ -148,6 +148,7 @@ async def flush_cache_once() -> None:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(f"{BACKEND_URL}{BACKEND_BULK_ENDPOINT}", json=payload)
+            logger.info(f"[BULK_FLUSH] Successfully sent {len(batch)} entries to backend\n{payload}")
             if response.status_code not in (200, 201):
                 raise httpx.HTTPStatusError(
                     f"Unexpected status code: {response.status_code}",
@@ -164,6 +165,7 @@ async def flush_cache_once() -> None:
 async def flush_cache_periodically() -> None:
     while True:
         await asyncio.sleep(RFID_BULK_FLUSH_SECONDS)
+        logger.debug("[BULK_FLUSH] Periodic flush triggered")
         await flush_cache_once()
 
 
@@ -213,9 +215,6 @@ async def flush_now():
 
 
 @app.post("/reader")
-@app.post("/reader/start")
-@app.post("/reader/mid")
-@app.post("/reader/end")
 async def receive_from_hub(request: Request):
     hit_timestamp = getattr(request.state, "hit_timestamp", current_ts())
     try:
@@ -364,9 +363,6 @@ def build_payload(
 
 
 @app.post("/test")
-@app.post("/test/start")
-@app.post("/test/mid")
-@app.post("/test/end")
 async def test_scan(request: Request):
     timing_point = get_timing_point_from_request(request, None)
     tp_label = timing_point.value.upper()

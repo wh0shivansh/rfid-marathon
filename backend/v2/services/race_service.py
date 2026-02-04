@@ -313,7 +313,7 @@ class RaceService:
         allowed_fields = [
             'name', 'distance_meters', 'location',
             'scheduled_date', 'description', 'status',
-            'start_time', 'end_time'
+            'start_time', 'mid_time', 'end_time'
         ]
         
         for field, value in updates.items():
@@ -377,57 +377,17 @@ class RaceService:
                 f"Allowed transitions: {', '.join(allowed_transitions) if allowed_transitions else 'none (status is final)'}"
             )
 
-        # Handle activation: created -> active
-        if new_status == RaceStatus.ACTIVE:
-            # If trying to activate a race, demote any existing active race to CREATED
-            # in the same transaction to guarantee at-most-one-active invariant.
-            existing_active = db.query(Race).filter_by(status=RaceStatus.ACTIVE.value).with_for_update().first()
-            if existing_active and str(existing_active.id) != str(race_id):
-                # demote the existing active race to CREATED (system action)
-                setattr(existing_active, "status", RaceStatus.CREATED.value)
-                setattr(existing_active, "updated_at", get_current_timestamp_utc())
-                db.add(existing_active)
-
-            # Now promote the target race to ACTIVE and assign a unified start_time
-            unified_start_time = get_current_timestamp_utc()
-            setattr(race, "status", RaceStatus.ACTIVE.value)
-            setattr(race, "start_time", unified_start_time)
-            setattr(race, "updated_at", unified_start_time)
-
-            # Assign the same start_time to all registered participants in this race
-            table_name_value = getattr(race, "table_name", None)
-            table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
-            try:
-                db.execute(
-                    text(f'UPDATE "{table_name}" SET start_time = :ts'),
-                    {"ts": unified_start_time}
-                )
-            except Exception as exc:
-                logger.warning(f"Failed to assign unified start_time to participants for race {race_id}: {exc}")
-
-            db.commit()
-            db.refresh(race)
-            logger.info(f"✓ Activated race: {race_id} (demoted existing active if present)")
-            return race
-
         # Handle starting a race (set to 'started')
         if new_status == RaceStatus.STARTED:
-            # Allow starting from CREATED or ACTIVE. If another race is active, demote it.
-            existing_active = db.query(Race).filter_by(status=RaceStatus.ACTIVE.value).with_for_update().first()
-            if existing_active and str(existing_active.id) != str(race_id):
-                setattr(existing_active, "status", RaceStatus.CREATED.value)
-                setattr(existing_active, "updated_at", get_current_timestamp_utc())
-                db.add(existing_active)
-
             # Promote target race to STARTED
             setattr(race, "status", RaceStatus.STARTED.value)
             setattr(race, "updated_at", get_current_timestamp_utc())
             db.commit()
             db.refresh(race)
-            logger.info(f"✓ Started race: {race_id} (demoted existing active if present)")
+            logger.info(f"✓ Started race: {race_id} (from {current_status.value})")
             return race
 
-        # Handle completing a race (allowed from created, active, or started per transition map)
+        # Handle completing a race (allowed from created, or started per transition map)
         if new_status == RaceStatus.COMPLETED:
             setattr(race, "status", RaceStatus.COMPLETED.value)
             setattr(race, "updated_at", get_current_timestamp_utc())
@@ -461,13 +421,13 @@ class RaceService:
             
         Raises:
             NotFoundError: If race doesn't exist
-            ConflictError: If race is active
+            ConflictError: If race is started
         """
         race = self.get_race(db, race_id)
         
-        # Cannot delete active race
-        if RaceStatus(race.status) == RaceStatus.ACTIVE:
-            raise ConflictError("Cannot delete an active race")
+        # Cannot delete started race
+        if RaceStatus(race.status) == RaceStatus.STARTED:
+            raise ConflictError("Cannot delete a started race")
         
         # Drop the participant table if it exists
         table_name_value = getattr(race, "table_name", None)

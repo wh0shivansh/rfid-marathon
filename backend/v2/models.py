@@ -391,7 +391,7 @@ class Race(Base):
 
     __table_args__ = (
         CheckConstraint('distance_meters >= 10 AND distance_meters <= 100000', name='check_race_distance'),
-        CheckConstraint("status IN ('created', 'active', 'started', 'completed')", name='check_race_status'),
+        CheckConstraint("status IN ('created', 'started', 'completed')", name='check_race_status'),
         Index('idx_races_status', 'status'),
         Index('idx_races_scheduled_date', 'scheduled_date'),
     )
