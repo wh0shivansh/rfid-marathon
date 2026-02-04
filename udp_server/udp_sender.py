@@ -7,7 +7,7 @@ and forwards it over UDP to an end-line UDP server (default localhost:6000).
 
 Usage:
   python udp_sender.py
-  OR run with uvicorn: `uvicorn mid_server.udp_sender:app --host 0.0.0.0 --port 8080`
+  OR run with uvicorn: `uvicorn udp_sender:app --host 0.0.0.0 --port 6001`
 
 Environment variables:
   END_HOST   - hostname/ip of end-line UDP server (default: 127.0.0.1)
@@ -25,7 +25,7 @@ from typing import Any, List, cast
 from fastapi import FastAPI
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [mid-server] %(levelname)s: %(message)s')
-logger = logging.getLogger('mid_server')
+logger = logging.getLogger('udp_sender')
 
 END_HOST = os.getenv('END_HOST', '127.0.0.1')
 END_PORT = int(os.getenv('END_PORT', '6000'))
@@ -93,4 +93,4 @@ async def receive_reader(payload: dict):
 
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run('mid_server.udp_sender:app', host=os.getenv('BIND_HOST', '0.0.0.0'), port=int(os.getenv('BIND_PORT', '8080')))
+    uvicorn.run('udp_sender:app', host=os.getenv('BIND_HOST', '0.0.0.0'), port=int(os.getenv('BIND_PORT', '6001')))

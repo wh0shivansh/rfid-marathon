@@ -6,6 +6,9 @@
  * Data is fetched from backend API via polling (every 2 seconds).
  */
 
+// Global variable to store selected race start time before confirmation
+let raceStartTimeSelection = null;
+
 export function renderRaceStart(races = [], selectedRaceId = null) {
   // Find selected race to determine button state
   const selectedRace = races.find(r => r.id === selectedRaceId);
@@ -120,6 +123,47 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
         </div>
       </div>
       ` : ''}
+    </div>
+  `;
+}
+
+/**
+ * Modal dialog for selecting race start time
+ */
+export function renderRaceStartTimeModal(scheduledDateIso) {
+  // Set default time to now, but formatted nicely for the input
+  const now = new Date();
+  const timeStr = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+  const scheduledDate = scheduledDateIso ? new Date(scheduledDateIso) : now;
+  const dateDisplay = scheduledDate.toLocaleDateString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+
+  return `
+    <div id="race-start-time-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;">
+      <div style="background: #0f172a; border: 2px solid #334155; border-radius: 8px; padding: 24px; max-width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+        <h2 style="color: #e2e8f0; margin: 0 0 16px 0; font-size: 18px;">Select Race Start Time</h2>
+        <p style="color: #a78bfa; font-size: 12px; margin: 0 0 8px 0;">When did the race start?</p>
+        <div style="color: #cbd5e1; font-size: 12px; margin: 0 0 16px 0;">Date: ${dateDisplay}</div>
+        
+        <div style="margin-bottom: 20px;">
+          <label for="race-start-time" style="color: #cbd5e1; font-size: 12px; display: block; margin-bottom: 4px;">Time (HH:MM)</label>
+          <input 
+            type="time" 
+            id="race-start-time" 
+            value="${timeStr}"
+            style="width: 100%; padding: 12px; background: #1e293b; border: 2px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 14px; box-sizing: border-box;"
+          />
+        </div>
+
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button id="cancel-start-time-btn" style="padding: 12px 20px; background: #6b7280; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">Cancel</button>
+          <button id="confirm-start-time-btn" style="padding: 12px 20px; background: #10b981; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">Confirm</button>
+        </div>
+      </div>
     </div>
   `;
 }

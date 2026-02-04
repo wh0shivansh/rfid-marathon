@@ -6,7 +6,7 @@ import { renderDashboard } from './views/Dashboard.js';
 import { renderCreateRace } from './views/CreateRace.js';
 import { renderCandidateManagement } from './views/CandidateManagement.js';
 import { renderScoreboard } from './views/Scoreboard.js';
-import { renderRaceStart } from './views/RaceStart.js';
+import { renderRaceStart, renderRaceStartTimeModal } from './views/RaceStart.js';
 import { renderRacesManagement } from './views/RacesManagement.js';
 
 const secureApi = window.secureApi;
@@ -1930,19 +1930,20 @@ function formatRaceStartCandidateRow(candidate, type) {
         <div>${startTimeStr}</div>
         <div>${endTimeStr}</div>
         <div style="justify-self: right;">${duration}</div>
-      </div>
-    `;
-  } else if (type === 'mid-point'){
-    return `
-      <div style="display: grid; grid-template-columns: 180px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+        </div>
+        `;
+      } else if (type === 'mid-point'){
+        return `
+        <div style="display: grid; grid-template-columns: 180px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
         <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
         <div style="justify-self: right;">${midTimeStr}</div>
-      </div>
-    `;
-  } else {
-    return `
-      <div style="display: grid; grid-template-columns: 180px auto; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+        </div>
+        `;
+      } else {
+        return `
+        <div style="display: grid; grid-template-columns: 180px 100px; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
         <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
+        <div>${startTimeStr}</div>
       </div>
     `;
   }
@@ -2066,41 +2067,79 @@ async function handleRaceStartSubmit(event) {
     return;
   }
   
-  return await globalLoader.wrap(async () => {
-    try {
-      await ensureAuth();
-      
-      // Send current timestamp from frontend
-      const startTime = new Date().toISOString();
-      
-      // Call backend API to start the race
-      await apiRequest(`/race/${raceStartSelectedRaceId}/start`, {
-        method: 'POST',
-        body: { start_time: startTime }
-      });
-      
-      raceStartTime = new Date();
-      showToast('Race started successfully', 'success');
-      
-      // Refresh races and re-render to update button state
-      await fetchRaces();
-      render();
-      
-      // Update race details
-      updateRaceDetailsDisplay();
-      
-      // Start duration clock
-      startDurationClock();
-      
-      // Refresh data to show updated times and status
-      await refreshRaceStartData();
+  const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
+  const scheduledDateIso = selectedRace?.scheduled_date;
 
-      // After starting the race on backend, ensure polling begins
-      startRaceDataPolling();
-    } catch (e) {
-      console.error('Failed to start race:', e);
-      showRaceStartStatusMessage(`Failed to start race: ${e.message}`, 'error');
+  // Show the time picker modal
+  const modalHtml = renderRaceStartTimeModal(scheduledDateIso);
+  const modalContainer = document.createElement('div');
+  modalContainer.innerHTML = modalHtml;
+  document.body.appendChild(modalContainer);
+
+  // Get modal elements
+  const modal = document.getElementById('race-start-time-modal');
+  const timeInput = document.getElementById('race-start-time');
+  const cancelBtn = document.getElementById('cancel-start-time-btn');
+  const confirmBtn = document.getElementById('confirm-start-time-btn');
+
+  // Handle cancel
+  cancelBtn.addEventListener('click', () => {
+    modalContainer.remove();
+  });
+
+  // Handle confirm
+  confirmBtn.addEventListener('click', async () => {
+    const selectedTime = timeInput.value;
+
+    if (!selectedTime) {
+      showToast('Please select a time', 'warning');
+      return;
     }
+
+    // Combine date and time into ISO string
+    const datePart = scheduledDateIso
+      ? new Date(scheduledDateIso).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0];
+    const startDateTime = new Date(`${datePart}T${selectedTime}:00`);
+    const startTimeIso = startDateTime.toISOString();
+
+    // Remove modal
+    modalContainer.remove();
+
+    // Show loader and send request
+    return await globalLoader.wrap(async () => {
+      try {
+        await ensureAuth();
+        
+        // Call backend API to start the race with the selected time
+        await apiRequest(`/race/${raceStartSelectedRaceId}/start`, {
+          method: 'POST',
+          body: { start_time: startTimeIso }
+        });
+        
+        raceStartTime = new Date();
+        showToast('Race started successfully', 'success');
+        
+        // Refresh races and re-render to update button state
+        await fetchRaces();
+        render();
+        
+        // Update race details
+        updateRaceDetailsDisplay();
+        
+        // Start duration clock
+        startDurationClock();
+        
+        // Refresh data to show updated times and status
+        await refreshRaceStartData();
+
+        // After starting the race on backend, ensure polling begins
+        startRaceDataPolling();
+      } catch (e) {
+        console.error('Failed to start race:', e);
+        showRaceStartStatusMessage(`Failed to start race: ${e.message}`, 'error');
+      }
+    });
   });
 }
 
@@ -2124,7 +2163,7 @@ async function refreshRaceStartData() {
       grace: participants.filter(p => p.status === 'grace'),
       running: participants.filter(p => p.status === 'running'),
       mid: participants.filter(p => p.mid_time !== null),
-      completed: participants.filter(p => p.status === 'completed')
+      completed: participants.filter(p => p.end_time !== null)
     };
     updateRaceStartCandidateDisplay(grouped);
     updateRaceStartStatistics(participants);

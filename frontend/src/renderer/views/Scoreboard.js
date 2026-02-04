@@ -53,6 +53,7 @@
         durationMs,
         formattedDuration,
         startTime,
+        midTime,
         endTime
       };
     });

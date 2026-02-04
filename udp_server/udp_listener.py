@@ -31,7 +31,7 @@ PROXY_URL = os.getenv('PROXY_URL', 'http://127.0.0.1:9090/reader')
 BIND_HOST = os.getenv('BIND_HOST', '0.0.0.0')
 BIND_PORT = int(os.getenv('BIND_PORT', '6000'))
 BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '8192'))
-READER_NAME = os.getenv('READER_NAME', 'Reader 3 - END')
+READER_NAME = os.getenv('READER_NAME', 'Reader 2 - MID')
 
 
 def forward_to_proxy(body: dict) -> Tuple[Optional[int], str]:
@@ -51,7 +51,7 @@ def forward_to_proxy(body: dict) -> Tuple[Optional[int], str]:
 def start_udp_server():
 	logger.info(f"Starting end-line UDP server on {BIND_HOST}:{BIND_PORT}, forwarding to {PROXY_URL}")
 	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+	# sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 	sock.bind((BIND_HOST, BIND_PORT))
 
 	while True:

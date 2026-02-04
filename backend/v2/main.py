@@ -1205,6 +1205,11 @@ async def rfid_bulk_upload(
 
         db.commit()
 
+        # Check if we should auto-end the race after processing bulk RFID data
+        if updated_end > 0:
+            race_id = str(getattr(race_row, "id"))
+            await check_and_auto_end_race(race_id, table_name, db)
+
         return create_success_response({
             "success": True,
             "message": "Bulk RFID data processed",
@@ -1404,8 +1409,8 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         
         # Find the participant with this RFID
         participant_row = db.execute(
-            text(f'SELECT id, status, start_time, end_time FROM "{table_name}" WHERE rfid_tag = :rfid'),
-            {"rfid": rfid_tag}
+            text(f'SELECT id, status, start_time, mid_time, end_time FROM :tName WHERE rfid_tag = :rfid'),
+            {"tName": table_name, "rfid": rfid_tag}
         ).fetchone()
         
         if not participant_row:
@@ -1443,6 +1448,9 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         
         # logger.info(f"✓ Recorded end time for RFID {rfid_tag} in race {race_name}, status set to 'completed'")
         
+        # Check if all participants now have end times, and auto-end the race if so
+        await check_and_auto_end_race(race_id, table_name, db)
+        
         response = RFIDHitResponse(
             success=True,
             message=f"End time recorded in {race_name}, status set to completed",
@@ -1457,6 +1465,73 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing end RFID: {str(e)}"
         )
+
+
+async def check_and_auto_end_race(race_id: str, table_name: str, db: Session) -> bool:
+    """
+    Check if all registered participants in a race have end_time.
+    If yes, auto-end the race by:
+    1. Getting the maximum end_time from all participants
+    2. Updating the race end_time and status to 'completed'
+    
+    Args:
+        race_id: Race ID
+        table_name: Participant table name
+        db: Database session
+    
+    Returns:
+        bool: True if race was auto-ended, False otherwise
+    """
+    try:
+        # Count total registered participants
+        total_count_result = db.execute(
+            text(f'SELECT COUNT(*) as cnt FROM "{table_name}"')
+        ).fetchone()
+        total_participants = int(getattr(total_count_result, "cnt", 0)) if total_count_result else 0
+        
+        if total_participants == 0:
+            logger.debug(f"[AUTO_END] Race {race_id} has no participants yet")
+            return False
+        
+        # Count participants with end_time
+        completed_count_result = db.execute(
+            text(f'SELECT COUNT(*) as cnt FROM "{table_name}" WHERE end_time IS NOT NULL')
+        ).fetchone()
+        completed_participants = int(getattr(completed_count_result, "cnt", 0)) if completed_count_result else 0
+        
+        logger.info(f"[AUTO_END] Race {race_id}: {completed_participants}/{total_participants} participants have end_time")
+        
+        # If all participants have end_time, auto-end the race
+        if completed_participants > 0 and completed_participants == total_participants:
+            logger.info(f"[AUTO_END] All participants finished! Auto-ending race {race_id}")
+            
+            # Get the maximum end_time as the race end time
+            max_end_time_result = db.execute(
+                text(f'SELECT MAX(end_time) as max_end FROM "{table_name}" WHERE end_time IS NOT NULL')
+            ).fetchone()
+            
+            max_end_time = getattr(max_end_time_result, "max_end", None) if max_end_time_result else None
+            
+            if max_end_time:
+                # Update race status to completed and set end_time
+                db.execute(
+                    text('UPDATE races SET status = :status, end_time = :ts WHERE id = :race_id'),
+                    {
+                        "status": RaceStatus.COMPLETED.value,
+                        "ts": max_end_time,
+                        "race_id": race_id
+                    }
+                )
+                db.commit()
+                logger.info(f"✓ Race {race_id} auto-ended at {max_end_time}")
+                return True
+        
+        return False
+    except Exception as e:
+        logger.error(f"[AUTO_END] Error checking/auto-ending race {race_id}: {e}", exc_info=True)
+        db.rollback()
+        return False
+
 
 
 async def _handle_rfid_mid(rfid_tag: str, db: Session, hit_timestamp: Optional[str] = None) -> dict:
