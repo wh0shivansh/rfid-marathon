@@ -42,7 +42,7 @@ class TimingPoint(Enum):
     END = "end"
 
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 LISTENER_PORT = int(os.getenv("LISTENER_PORT", 9090))
 
 logger.info(f"[CONFIG] Backend URL: {BACKEND_URL}")

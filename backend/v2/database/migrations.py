@@ -94,7 +94,7 @@ class MigrationManager:
         Uses the `races.table_name` to locate per-race tables and adds column if missing.
         IDEMPOTENT and safe across all environments.
         
-        Status values: 'registered', 'grace', 'running', 'completed'
+        Status values: 'registered', 'grace', 'running', 'completed', 'disqualified'
         """
         results: Dict[str, Any] = {"updated_tables": [], "skipped_tables": [], "errors": []}
         try:
@@ -117,7 +117,7 @@ class MigrationManager:
                             ALTER TABLE "{table_name}" 
                             ADD COLUMN status VARCHAR(20) DEFAULT 'registered' NOT NULL,
                             ADD CONSTRAINT check_{table_name}_status 
-                            CHECK (status IN ('registered', 'grace', 'running', 'completed'))
+                            CHECK (status IN ('registered', 'grace', 'running', 'completed', 'disqualified'))
                         """
                         try:
                             conn.execute(text(alter_sql))
@@ -125,6 +125,7 @@ class MigrationManager:
                             update_sql = f"""
                                 UPDATE "{table_name}"
                                 SET status = CASE
+                                    WHEN end_time IS NOT NULL AND mid_time IS NULL THEN 'disqualified'
                                     WHEN end_time IS NOT NULL THEN 'completed'
                                     WHEN start_time IS NOT NULL THEN 'running'
                                     ELSE 'registered'
@@ -136,7 +137,32 @@ class MigrationManager:
                         except Exception as e:
                             results["errors"].append({"table": table_name, "error": str(e)})
                     else:
-                        results["skipped_tables"].append(table_name)
+                        # Ensure the status constraint allows disqualified
+                        try:
+                            conn.execute(text(f'ALTER TABLE "{table_name}" DROP CONSTRAINT IF EXISTS check_{table_name}_status'))
+                            conn.execute(text(f"""
+                                ALTER TABLE "{table_name}"
+                                ADD CONSTRAINT check_{table_name}_status
+                                CHECK (status IN ('registered', 'grace', 'running', 'completed', 'disqualified'))
+                            """))
+
+                            # Mark missing mid_time as disqualified where end_time exists
+                            conn.execute(text(f"""
+                                UPDATE "{table_name}"
+                                SET status = 'disqualified'
+                                WHERE end_time IS NOT NULL AND mid_time IS NULL AND status != 'disqualified'
+                            """))
+
+                            # Normalize invalid/null statuses
+                            conn.execute(text(f"""
+                                UPDATE "{table_name}"
+                                SET status = 'registered'
+                                WHERE status IS NULL OR status NOT IN ('registered', 'grace', 'running', 'completed', 'disqualified')
+                            """))
+
+                            results["updated_tables"].append(table_name)
+                        except Exception as e:
+                            results["errors"].append({"table": table_name, "error": str(e)})
                 conn.commit()
             results["success"] = True
             return results

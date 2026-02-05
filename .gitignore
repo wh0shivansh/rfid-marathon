@@ -1,2 +1,7 @@
 .env
 __pycache__
+.venv
+build
+dist
+out
+RFID-Marathon-automation*

@@ -112,7 +112,8 @@
     { maxAge: 45, excellent: 30, good: 31.5, satisfied: 33 },
   ];
 
-  function getPerformanceLabel(age, durationMs) {
+  function getPerformanceLabel(age, durationMs, status) {
+    if (status === 'disqualified') return 'Disqualified';
     if (durationMs === null || durationMs === undefined || !age) return 'N/A';
     const mins = durationMs / 60000;
     const group = ageThresholds.find(g => age <= g.maxAge) || ageThresholds[ageThresholds.length - 1];
@@ -139,11 +140,6 @@
 
           <input id="scoreboard-search-input" placeholder="Search by name..." value="${options.searchQuery || ''}" style="padding: 10px 12px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.95em; min-width: 240px;" />
         </div>
-        ${selectedRaceId ? `
-          <button id="export-scoreboard-btn" style="padding: 12px 24px; background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; transition: all 0.3s ease;">
-            📊 Export Results
-          </button>
-        ` : ''}
       </div>
 
       ${!selectedRaceId ? `
@@ -222,8 +218,8 @@
                   const rank = p.rank ?? baselineRankMap.get(stableKey) ?? (p.durationMs !== null ? index + 1 : '-');
                   const isTop3 = p.durationMs !== null && index < 3;
                   const medalColor = index === 0 ? '#fbbf24' : index === 1 ? '#94a3b8' : index === 2 ? '#cd7f32' : '';
-                  const perf = getPerformanceLabel(p.age, p.durationMs);
-                  const perfColor = perf === 'Excellent' ? '#10b981' : perf === 'Good' ? '#f59e0b' : perf === 'Satisfied' ? '#60a5fa' : '#ef4444';
+                  const perf = getPerformanceLabel(p.age, p.durationMs, p.status);
+                  const perfColor = perf === 'Disqualified' ? '#ef4444' : perf === 'Excellent' ? '#10b981' : perf === 'Good' ? '#f59e0b' : perf === 'Satisfied' ? '#60a5fa' : '#ef4444';
                   
                   return `
                     <tr style="border-bottom: 1px solid #1f2937; transition: background 0.2s;" class="scoreboard-row">

@@ -516,12 +516,9 @@ function renderSidebar() {
 }
 
 function renderHeader() {
-  const statusText = navigator.onLine ? "Online" : "Offline";
-  const statusClass = navigator.onLine ? "status-online" : "status-offline";
   return `
     <div class="topbar">
       <div class="status-group">
-        <span class="pill ${statusClass}">${statusText}</span>
         <span class="pill">Registrations done today: ${state.dashboardData.todayRegistrations}</span>
       </div>
       <div class="actions">
@@ -901,6 +898,23 @@ async function render() {
     }, 100);
   }
 
+  if (state.view === "create" && (!state.races || state.races.length === 0)) {
+    await fetchRaces();
+  }
+
+  const copyFromRaceSelect = document.getElementById("copy-from-race-id");
+  if (copyFromRaceSelect) {
+    const currentValue = copyFromRaceSelect.value;
+    const options = [
+      '<option value="">Do not copy</option>',
+      ...state.races.map((race) => `<option value="${race.id}">${race.name}</option>`)
+    ];
+    copyFromRaceSelect.innerHTML = options.join("");
+    if (currentValue) {
+      copyFromRaceSelect.value = currentValue;
+    }
+  }
+
   const createForm = document.getElementById("create-race-form");
   if (createForm) {
     createForm.addEventListener("submit", async (e) => {
@@ -946,6 +960,7 @@ async function render() {
       
       try {
         await ensureAuth();
+        const copyFromRaceId = formData.copy_from_race_id ? String(formData.copy_from_race_id).trim() : "";
         await apiRequest("/race", {
           method: "POST",
           body: {
@@ -963,6 +978,7 @@ async function render() {
             age_40to45_excellent: convertToSeconds(formData.age_40to45_excellent, 'age_40to45_excellent'),
             age_40to45_good: convertToSeconds(formData.age_40to45_good, 'age_40to45_good'),
             age_40to45_satisfactory: convertToSeconds(formData.age_40to45_satisfactory, 'age_40to45_satisfactory'),
+            ...(copyFromRaceId ? { copy_from_race_id: copyFromRaceId } : {}),
           },
         });
         showToast("Race created successfully", 'success');
@@ -1036,13 +1052,13 @@ async function render() {
         };
 
         try {
-          if (raceId) {
-            // Update existing race
-            await updateRace(raceId, formData);
-          } else {
-            // Create new race
-            await createRace(formData);
+          if (!raceId) {
+            showToast('Please select a race to edit', 'error');
+            return;
           }
+
+          // Update existing race
+          await updateRace(raceId, formData);
           
           const modalClose = document.getElementById("race-modal");
           if (modalClose) {
@@ -1060,21 +1076,9 @@ async function render() {
       btn.addEventListener("click", () => {
         const raceId = btn.dataset.raceId;
         const race = state.races.find(r => r.id === raceId);
-        
+
         if (race) {
-          const modal = document.getElementById("race-modal");
-          const modalTitle = document.getElementById("modal-title");
-          
-          modalTitle.textContent = "Edit Race";
-          document.getElementById("race-id").value = race.id;
-          document.getElementById("race-name").value = race.name;
-          document.getElementById("race-distance").value = race.distance_meters;
-          document.getElementById("race-location").value = race.location;
-          document.getElementById("race-scheduled-date").value = race.scheduled_date.split('T')[0];
-          document.getElementById("race-description").value = race.description || "";
-          
-          modal.style.display = "flex";
-          modal.style.pointerEvents = "auto";
+          openRaceEditModal(race);
         }
       });
     });
@@ -1318,6 +1322,289 @@ function attachRegistrationWizardHandlers() {
   }
 }
 
+function openRaceEditModal(race) {
+  if (!race) return;
+
+  const modalContainer = document.createElement('div');
+  modalContainer.innerHTML = `
+    <div class="dark-modal-overlay" style="display: flex;">
+      <div class="dark-modal" style="max-width: 650px;">
+        <div class="dark-modal-header">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="width: 42px; height: 42px; background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">🏁</div>
+            <h2 style="margin: 0; font-size: 22px; font-weight: 700; color: #e2e8f0;">Edit Race</h2>
+          </div>
+          <button class="dark-modal-close" data-action="close">&times;</button>
+        </div>
+        <form data-action="form" style="margin-top: 24px;">
+          <div class="race-modal-body" style="display:flex; gap:16px; align-items:flex-start;">
+            <div class="race-panel" style="flex:1; min-width:260px;">
+              <div class="dark-form-group">
+                <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                  <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">🏆 Race Name</span>
+                  <span style="color: #ef4444; font-weight: 700;">*</span>
+                </label>
+                <input type="text" data-field="name" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
+              </div>
+
+              <div class="dark-form-group">
+                <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                  <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📝 Description</span>
+                  <span style="color: #64748b; font-size: 12px; font-weight: 400;">(optional)</span>
+                </label>
+                <textarea data-field="description" rows="6" style="padding: 12px 14px; font-size: 14px; border-radius: 6px; border: 2px solid #334155; resize: vertical; min-height: 120px; line-height: 1.5; transition: all 0.3s ease; width:100%;"></textarea>
+              </div>
+            </div>
+
+            <div class="race-panel" style="flex:1; min-width:260px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px;">
+                <div class="dark-form-group">
+                  <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                    <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📏 Distance (m)</span>
+                    <span style="color: #ef4444; font-weight: 700;">*</span>
+                  </label>
+                  <input type="number" data-field="distance_meters" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
+                </div>
+
+                <div class="dark-form-group">
+                  <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                    <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📅 Scheduled Date</span>
+                    <span style="color: #ef4444; font-weight: 700;">*</span>
+                  </label>
+                  <input type="date" data-field="scheduled_date" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
+                </div>
+              </div>
+
+              <div class="dark-form-group">
+                <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                  <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📍 Location</span>
+                  <span style="color: #ef4444; font-weight: 700;">*</span>
+                </label>
+                <input type="text" data-field="location" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; padding-top: 16px; border-top: 1px solid #334155;">
+            <button type="button" data-action="cancel" class="dark-btn-secondary" style="padding: 12px 28px; font-size: 15px; font-weight: 600; border-radius: 6px;">Cancel</button>
+            <button type="submit" class="dark-btn-primary" style="padding: 12px 28px; font-size: 15px; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
+              <span>💾</span>
+              <span>Save Race</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modalContainer);
+  const overlay = modalContainer.querySelector('.dark-modal-overlay');
+  const closeBtn = modalContainer.querySelector('[data-action="close"]');
+  const cancelBtn = modalContainer.querySelector('[data-action="cancel"]');
+  const form = modalContainer.querySelector('[data-action="form"]');
+
+  const cleanup = () => {
+    modalContainer.remove();
+  };
+
+  if (closeBtn) closeBtn.addEventListener('click', cleanup);
+  if (cancelBtn) cancelBtn.addEventListener('click', cleanup);
+  if (overlay) overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) cleanup();
+  });
+
+  const nameEl = modalContainer.querySelector('[data-field="name"]');
+  const distanceEl = modalContainer.querySelector('[data-field="distance_meters"]');
+  const locationEl = modalContainer.querySelector('[data-field="location"]');
+  const scheduledEl = modalContainer.querySelector('[data-field="scheduled_date"]');
+  const descriptionEl = modalContainer.querySelector('[data-field="description"]');
+
+  if (nameEl) nameEl.value = race.name || '';
+  if (distanceEl) distanceEl.value = race.distance_meters || '';
+  if (locationEl) locationEl.value = race.location || '';
+  if (scheduledEl && race.scheduled_date) {
+    scheduledEl.value = String(race.scheduled_date).split('T')[0];
+  }
+  if (descriptionEl) descriptionEl.value = race.description || '';
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = {
+        name: nameEl ? nameEl.value : race.name,
+        distance_meters: distanceEl ? Number(distanceEl.value) : race.distance_meters,
+        location: locationEl ? locationEl.value : race.location,
+        scheduled_date: scheduledEl ? scheduledEl.value : (race.scheduled_date || ''),
+        description: descriptionEl ? (descriptionEl.value || undefined) : race.description || undefined,
+      };
+
+      try {
+        await updateRace(race.id, formData);
+        cleanup();
+      } catch (err) {
+        // Errors handled in updateRace
+      }
+    });
+  }
+}
+
+function openCandidateEditModal(participant) {
+  if (!participant) return;
+
+  const modalContainer = document.createElement('div');
+  const raceOptions = state.races
+    .filter(r => r.status === 'created')
+    .map(r => `<option value="${r.id}">${r.name} - ${r.location} (${new Date(r.scheduled_date).toLocaleDateString()})</option>`)
+    .join('');
+
+  modalContainer.innerHTML = `
+    <div class="dark-modal-overlay" style="display: flex;">
+      <div class="dark-modal" style="max-width: 700px;">
+        <div class="dark-modal-header">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="width: 42px; height: 42px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">👤</div>
+            <h2 style="margin: 0; font-size: 22px; font-weight: 700; color: #e2e8f0;">Edit Candidate</h2>
+          </div>
+          <button class="dark-modal-close" data-action="close">&times;</button>
+        </div>
+
+        <form data-action="form" style="margin-top: 24px;">
+          <div class="dark-form-group">
+            <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+              <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">🏁 Select Race</span>
+            </label>
+            <select data-field="race_id" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; cursor: pointer; transition: all 0.3s ease;">
+              <option value="">-- Choose a race --</option>
+              ${raceOptions}
+            </select>
+          </div>
+
+          <div class="candidate-modal-body" style="display:flex; gap:16px; align-items:flex-start;">
+            <div class="candidate-panel" style="flex:1; min-width: 260px;">
+              <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #1e293b; margin-bottom: 0;">
+                <div style="color: #94a3b8; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">Personal Information</div>
+
+                <div class="dark-form-group" style="margin-bottom: 14px;">
+                  <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                    <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">👤 Full Name</span>
+                    <span style="color: #ef4444; font-weight: 700;">*</span>
+                  </label>
+                  <input type="text" data-field="name" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="dark-form-group" style="margin-bottom: 0;">
+                    <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                      <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">🎂 Age</span>
+                      <span style="color: #ef4444; font-weight: 700;">*</span>
+                    </label>
+                    <input type="number" data-field="age" min="5" max="120" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
+                  </div>
+
+                  <div class="dark-form-group" style="margin-bottom: 0;">
+                    <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                      <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">⚧ Gender</span>
+                      <span style="color: #ef4444; font-weight: 700;">*</span>
+                    </label>
+                    <select data-field="gender" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; cursor: pointer; transition: all 0.3s ease; width:100%;">
+                      <option value="">Select</option>
+                      <option value="M">Male</option>
+                      <option value="F">Female</option>
+                      <option value="O">Other</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="candidate-panel" style="flex:1; min-width: 260px;">
+              <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #1e293b;">
+                <div style="color: #94a3b8; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">RFID Information</div>
+
+                <div class="dark-form-group" style="margin-bottom: 0;">
+                  <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                    <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">🏷️ RFID Tag Number</span>
+                  </label>
+                  <input type="text" data-field="rfid" required style="padding: 12px 14px; font-size: 15px; font-family: monospace; border-radius: 6px; border: 2px solid #334155; text-transform: uppercase; transition: all 0.3s ease; width:100%;">
+                  <div style="color: #64748b; font-size: 12px; margin-top: 6px; display: flex; align-items: center; gap: 4px;">
+                    <span>ℹ️</span>
+                    <span>Tag must be unique for this race</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 32px; padding-top: 24px; border-top: 1px solid #334155;">
+            <button type="button" data-action="cancel" class="dark-btn-secondary" style="padding: 12px 28px; font-size: 15px; font-weight: 600; border-radius: 6px;">Cancel</button>
+            <button type="submit" class="dark-btn-primary" style="padding: 12px 28px; font-size: 15px; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
+              <span>💾</span>
+              <span>Save Candidate</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modalContainer);
+  const overlay = modalContainer.querySelector('.dark-modal-overlay');
+  const closeBtn = modalContainer.querySelector('[data-action="close"]');
+  const cancelBtn = modalContainer.querySelector('[data-action="cancel"]');
+  const form = modalContainer.querySelector('[data-action="form"]');
+
+  const cleanup = () => {
+    modalContainer.remove();
+  };
+
+  if (closeBtn) closeBtn.addEventListener('click', cleanup);
+  if (cancelBtn) cancelBtn.addEventListener('click', cleanup);
+  if (overlay) overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) cleanup();
+  });
+
+  const nameEl = modalContainer.querySelector('[data-field="name"]');
+  const ageEl = modalContainer.querySelector('[data-field="age"]');
+  const genderEl = modalContainer.querySelector('[data-field="gender"]');
+  const raceEl = modalContainer.querySelector('[data-field="race_id"]');
+  const rfidEl = modalContainer.querySelector('[data-field="rfid"]');
+
+  let displayName = participant.decryptedName || participant.name || '';
+  if (!displayName && participant.encrypted_name && participant.encryption_key) {
+    displayName = decryptName(participant.encrypted_name, participant.encryption_key) || '';
+  }
+
+  if (nameEl) nameEl.value = displayName;
+  if (ageEl) ageEl.value = participant.age || '';
+  if (genderEl) genderEl.value = participant.gender || '';
+  if (raceEl) {
+    raceEl.value = participant.race_id || '';
+    raceEl.disabled = true;
+  }
+  if (rfidEl) {
+    rfidEl.value = participant.rfid_tag || participant.rfid || '';
+    rfidEl.disabled = true;
+  }
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const updates = {
+        name: nameEl ? nameEl.value : participant.name,
+        age: ageEl ? Number(ageEl.value) : participant.age,
+        gender: genderEl ? genderEl.value : participant.gender,
+      };
+
+      try {
+        await updateCandidate(participant.id, updates);
+        cleanup();
+      } catch (err) {
+        // Errors handled by updateCandidate
+      }
+    });
+  }
+}
+
 // ============================================================================
 // CANDIDATE MANAGEMENT VIEW HANDLERS
 // ============================================================================
@@ -1364,37 +1651,7 @@ function attachCandidateManagementHandlers() {
         return;
       }
 
-      // Open edit modal and populate fields
-      const modal = document.getElementById('candidate-modal');
-      const modalTitle = document.getElementById('candidate-modal-title');
-      modalTitle.textContent = 'Edit Candidate';
-      document.getElementById('candidate-id').value = candidateId;
-      document.getElementById('candidate-race-id').value = participant.race_id;
-
-      // Decrypt name if needed (leave as encrypted fallback)
-      let decryptedName = participant.encrypted_name || participant.name;
-      if (participant.encryption_key && decryptedName) {
-        try {
-          const dec = await window.electronAPI.decryptFernet(decryptedName, participant.encryption_key);
-          decryptedName = dec;
-        } catch (err) {
-          console.error('Failed to decrypt name:', err);
-        }
-      }
-
-      document.getElementById('candidate-name').value = decryptedName || '';
-      document.getElementById('candidate-rfid').value = participant.rfid_tag || participant.rfid || '';
-      document.getElementById('candidate-age').value = participant.age || '';
-      document.getElementById('candidate-gender').value = participant.gender || '';
-
-      // Disable RFID and race selection on edit to avoid moving between per-race tables
-      const rfidEl = document.getElementById('candidate-rfid');
-      if (rfidEl) { rfidEl.disabled = true; }
-      const raceEl = document.getElementById('candidate-race-id');
-      if (raceEl) { raceEl.disabled = true; }
-
-      modal.style.display = 'flex';
-      modal.style.pointerEvents = 'auto';
+      openCandidateEditModal(participant);
     });
   });
 
@@ -1406,9 +1663,6 @@ function attachCandidateManagementHandlers() {
       await deleteCandidate(candidateId);
     });
   });
-
-  // Note: Modal-based create/edit has been replaced by the registration page.
-  // Candidate creation and editing now use the dedicated registration flow.
 }
 
 // Re-attach modal controls for CandidateManagement (close/cancel/submit)
@@ -1448,6 +1702,9 @@ function attachCandidateModalControls() {
         if (candidateId) {
           const updates = { name: nameVal, age: ageVal, gender: genderVal };
           await updateCandidate(candidateId, updates);
+        } else {
+          showToast('Please select a candidate to edit', 'error');
+          return;
         }
         const modal = document.getElementById('candidate-modal');
         if (modal) {
@@ -1475,14 +1732,6 @@ function attachScoreboardHandlers() {
       scoreboardSelectedRaceId = e.target.value || null;
       await fetchParticipants(scoreboardSelectedRaceId, true);
       render();
-    });
-  }
-
-  // Export Scoreboard Button (future feature)
-  const exportScoreboardBtn = document.getElementById('export-scoreboard-btn');
-  if (exportScoreboardBtn) {
-    exportScoreboardBtn.addEventListener('click', () => {
-      showToast('Export feature coming soon', 'info');
     });
   }
 

@@ -117,12 +117,6 @@ RFID_MIN_READ_COUNT_TO_LOCK: Final[int] = int(os.getenv("RFID_MIN_READ_COUNT_TO_
 # No-hit timeout to lock remaining unlocked candidates (seconds)
 RFID_NO_HIT_TIMEOUT_SECONDS: Final[int] = int(os.getenv("RFID_NO_HIT_TIMEOUT_SECONDS", 20))
 
-# Reader name mapping (configure which readers are start/end)
-# By default: readers with "start" or "Reader 1" in name are start readers
-#             readers with "end" or "Reader 2" in name are end readers
-RFID_START_READER_NAMES: Final[list] = ["Reader 1", "start", "Start"] + os.getenv("RFID_START_READER_NAMES", "").split(",")
-RFID_END_READER_NAMES: Final[list] = ["Reader 2", "end", "End"] + os.getenv("RFID_END_READER_NAMES", "").split(",")
-
 # ============================================================================
 # RACE STATE CONSTANTS (BACKEND ONLY)
 # ============================================================================

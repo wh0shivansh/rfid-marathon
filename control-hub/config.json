@@ -1,0 +1,11 @@
+{
+  "compose_file": "../docker-compose.hub.yml",
+  "project_name": "rfid-marathon",
+  "services": [
+    "rfid-postgres",
+    "rfid-backend",
+    "rfid-proxy",
+    "udp-sender",
+    "udp-listener"
+  ]
+}

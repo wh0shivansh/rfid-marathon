@@ -70,6 +70,14 @@ export function renderCreateRace() {
               <div class="dark-form-group"><input name="age_40to45_satisfactory" type="number" step="0.01" min="0" placeholder="35" /></div>
             </div>
           </div>
+
+          <div class="dark-form-group" style="grid-column: 1 / -1;">
+            <label>Copy participants from existing race (optional)</label>
+            <select id="copy-from-race-id" name="copy_from_race_id">
+              <option value="">Do not copy</option>
+            </select>
+            <div style="margin-top: 6px; color: #94a3b8; font-size: 12px;">Copies name, RFID, age, gender, category, and encryption metadata. Timing fields are left empty.</div>
+          </div>
           
           <div class="form-actions" style="grid-column: 1 / -1;">
             <button type="submit" class="dark-btn-primary">Create Race</button>

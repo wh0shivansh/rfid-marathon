@@ -43,7 +43,7 @@ class TimingPoint(Enum):
     END = "end"
 
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 BACKEND_BULK_ENDPOINT = os.getenv("BACKEND_BULK_ENDPOINT", "/api/v2/rfid/bulk")
 LISTENER_PORT = int(os.getenv("LISTENER_PORT", 9090))
 RFID_BULK_FLUSH_SECONDS = int(os.getenv("RFID_BULK_FLUSH_SECONDS", 5))

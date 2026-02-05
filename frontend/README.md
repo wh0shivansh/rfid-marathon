@@ -29,7 +29,7 @@ Secure, offline-first Electron desktop app for RFID-based marathon management.
                │ HTTPS + JWT
                ▼
 ┌─────────────────────────────────────┐
-│    Backend (FastAPI - 8001)         │
+│    Backend (FastAPI - 8000)         │
 │    • State management               │
 │    • Database operations            │
 │    • Encryption                     │
@@ -54,7 +54,7 @@ Secure, offline-first Electron desktop app for RFID-based marathon management.
 | Component | Role | Storage | State |
 |-----------|------|---------|-------|
 | **Frontend** (Electron) | User interface | SQLite local | Race selection, queue |
-| **Backend** (Port 8001) | API, state management | PostgreSQL | race_state.json |
+| **Backend** (Port 8000) | API, state management | PostgreSQL | race_state.json |
 | **RFID Listener** (Port 9090) | Hub interface | **NONE** | Stateless proxy |
 
 **Important**: The RFID Listener (9090) has **ZERO local storage**. It's a stateless proxy that only forwards hits to the backend. The frontend does NOT interact with the listener.
@@ -64,7 +64,7 @@ Secure, offline-first Electron desktop app for RFID-based marathon management.
 ## 🔧 Environment Setup
 
 1. Copy `.env.template` to `.env` and fill values:
-   - `VITE_API_BASE_URL`: Backend URL (e.g., `http://localhost:8001/api/v1`). **NOT listener 9090.**
+   - `VITE_API_BASE_URL`: Backend URL (e.g., `http://localhost:8000/api/v1`). **NOT listener 9090.**
    - `RFID_USERNAME` / `RFID_PASSWORD`: Login credentials (hashed server-side on backend).
    - `FRONTEND_RSA_PRIVATE_KEY_PATH`: Local private key for decrypting participant names.
 
@@ -364,11 +364,11 @@ npm run make          # Create installer
 
 **The RFID Listener (Port 9090) is NOT part of the frontend.** It's a separate server-side component that:
 - Receives RFID hits from hardware hubs
-- Forwards them to the backend (port 8001)
+- Forwards them to the backend (port 8000)
 - Has ZERO local storage
 - Does NOT interact with this Electron app
 
-Frontend ONLY communicates with Backend (port 8001) for:
+Frontend ONLY communicates with Backend (port 8000) for:
 - Authentication
 - Participant registration
 - Timing queries

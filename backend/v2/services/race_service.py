@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from models import Race, Participant
+from services.fernet_manager import get_fernet_manager
 from basefunctions import (
     NotFoundError,
     ConflictError,
@@ -49,6 +50,7 @@ class RaceService:
         location: str,
         scheduled_date_str: str,
         created_by: str,
+        copy_from_race_id: Optional[str] = None,
         description: Optional[str] = None,
         age_upto30_excellent: Optional[float] = None,
         age_upto30_good: Optional[float] = None,
@@ -128,6 +130,23 @@ class RaceService:
 
             # Create per-race participant table (outside row locking semantics)
             self._create_per_race_participant_table(db, table_name, str(race.id))
+
+            # Optional: copy participants from an existing race
+            if copy_from_race_id:
+                try:
+                    copied_count = self._copy_participants_from_race(db, copy_from_race_id, race)
+                    logger.info(
+                        f"✓ Copied {copied_count} participants from race {copy_from_race_id} to {race.id}"
+                    )
+                except Exception as copy_exc:
+                    logger.error(f"Failed to copy participants from {copy_from_race_id}: {copy_exc}")
+                    try:
+                        db.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+                        db.delete(race)
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+                    raise
             
             logger.info(f"✓ Created race: {race.id} ({name}) - participants table: {table_name}")
             return race
@@ -219,7 +238,8 @@ class RaceService:
                     status VARCHAR(20) NOT NULL DEFAULT 'registered',
                     CONSTRAINT uq_{table_name}_race_rfid UNIQUE (race_id, rfid_tag),
                     CONSTRAINT check_{table_name}_age CHECK (age >= 5 AND age <= 120),
-                    CONSTRAINT check_{table_name}_gender CHECK (gender IN ('M', 'F', 'O'))
+                    CONSTRAINT check_{table_name}_gender CHECK (gender IN ('M', 'F', 'O')),
+                    CONSTRAINT check_{table_name}_status CHECK (status IN ('registered', 'grace', 'running', 'completed', 'disqualified'))
                 );
             """)
             
@@ -240,6 +260,76 @@ class RaceService:
             db.rollback()
             logger.error(f"Failed to create per-race participant table {table_name}: {exc}")
             raise ConflictError(f"Failed to create participant table for race: {exc}")
+
+    def _copy_participants_from_race(self, db: Session, source_race_id: str, target_race: Race) -> int:
+        """
+        Copy participants from a source race to the target race.
+        Copies encrypted_name, RFID, age, gender, category, and encryption metadata.
+        Timing fields are intentionally left empty.
+        """
+        if source_race_id == str(target_race.id):
+            raise ValidationError("Source race must be different from the target race")
+
+        source_race = db.query(Race).filter_by(id=source_race_id).first()
+        if not source_race:
+            raise NotFoundError("Race", source_race_id)
+
+        source_table = getattr(source_race, "table_name", None) or f"race_{source_race.name}_participants"
+        target_table = getattr(target_race, "table_name", None) or f"race_{target_race.name}_participants"
+
+        rows = db.execute(
+            text(
+                f"""
+                SELECT rfid_tag, encrypted_name, age, gender, category, encryption_key_id
+                FROM "{source_table}"
+                WHERE race_id = :race_id
+                """
+            ),
+            {"race_id": source_race_id}
+        ).fetchall()
+
+        if not rows:
+            return 0
+
+        fernet_manager = get_fernet_manager()
+        payloads = []
+        for row in rows:
+            rfid_tag = getattr(row, "rfid_tag", None) or row[0]
+            encrypted_name = getattr(row, "encrypted_name", None) or row[1]
+            age = getattr(row, "age", None) or row[2]
+            gender = getattr(row, "gender", None) or row[3]
+            category = getattr(row, "category", None) or row[4]
+            encryption_key_id = getattr(row, "encryption_key_id", None) or row[5]
+
+            if not encryption_key_id:
+                key_record = fernet_manager.get_or_create_active_key(db)
+                encryption_key_id = str(key_record.id)
+
+            payloads.append({
+                "id": str(uuid.uuid4()),
+                "race_id": str(target_race.id),
+                "rfid_tag": rfid_tag,
+                "encrypted_name": encrypted_name,
+                "age": age,
+                "gender": gender,
+                "category": category,
+                "encryption_key_id": encryption_key_id,
+            })
+
+        try:
+            insert_sql = text(
+                f"""
+                INSERT INTO "{target_table}"
+                (id, race_id, rfid_tag, encrypted_name, age, gender, category, encryption_key_id, registered_at)
+                VALUES (:id, :race_id, :rfid_tag, :encrypted_name, :age, :gender, :category, :encryption_key_id, NOW())
+                """
+            )
+            db.execute(insert_sql, payloads)
+            db.commit()
+            return len(payloads)
+        except IntegrityError as exc:
+            db.rollback()
+            raise ConflictError(f"Failed to copy participants: {exc}")
     
     def get_race(self, db: Session, race_id: str) -> Race:
         """

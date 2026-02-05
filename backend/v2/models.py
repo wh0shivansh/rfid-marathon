@@ -75,6 +75,7 @@ class RaceCreateRequest(BaseModel):
     location: str = Field(..., min_length=3, max_length=200)
     scheduled_date: str = Field(..., description="ISO 8601 date")
     description: Optional[str] = Field(None, max_length=1000)
+    copy_from_race_id: Optional[str] = Field(None, description="Optional race ID to copy participants from")
     # Age category qualifying times (in seconds) - defaults are in minutes converted to seconds
     age_upto30_excellent: float = Field(1500, ge=0)  # 25 min = 1500 sec
     age_upto30_good: float = Field(1578, ge=0)  # 26.30 min = 1578 sec
@@ -421,13 +422,13 @@ class Participant(Base):
     start_time = Column(DateTime(timezone=True), nullable=True)  # When participant started
     mid_time = Column(DateTime(timezone=True), nullable=True)  # Mid-point verification
     end_time = Column(DateTime(timezone=True), nullable=True)  # When participant finished
-    status = Column(String(20), default='registered', nullable=False)  # registered, grace, running, completed
+    status = Column(String(20), default='registered', nullable=False)  # registered, grace, running, completed, disqualified
 
     __table_args__ = (
         UniqueConstraint('race_id', 'rfid_tag', name='uq_participant_race_rfid'),
         CheckConstraint("age >= 5 AND age <= 120", name='check_participant_age'),
         CheckConstraint("gender IN ('M', 'F', 'O')", name='check_participant_gender'),
-        CheckConstraint("status IN ('registered', 'grace', 'running', 'completed')", name='check_participant_status'),
+        CheckConstraint("status IN ('registered', 'grace', 'running', 'completed', 'disqualified')", name='check_participant_status'),
         Index('idx_participants_race_id', 'race_id'),
         Index('idx_participants_rfid_tag', 'rfid_tag'),
         Index('idx_participants_status', 'status'),
