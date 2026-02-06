@@ -1,12 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+from PyInstaller.utils.hooks import collect_submodules
+
 a = Analysis(
     ['run_udp_listener.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=collect_submodules('requests','python-dotenv','uvicorn'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

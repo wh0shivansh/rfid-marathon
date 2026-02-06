@@ -18,11 +18,11 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install pyinstaller
 
-# Build single-file executable
-pyinstaller --noconfirm --name udp-listener run_udp_listener.py
-Write-Host "Listener Build complete. Output: dist\udp_listener.exe"
+# Build one-folder executables using spec files
+pyinstaller --noconfirm udp-listener.spec
+Write-Host "Listener Build complete. Output: dist\udp-listener\udp-listener.exe"
 
-pyinstaller --noconfirm --name udp-sender run_udp_sender.py
-Write-Host "Sender Build complete. Output: dist\udp_sender.exe"
+pyinstaller --noconfirm udp-sender.spec
+Write-Host "Sender Build complete. Output: dist\udp-sender\udp-sender.exe"
 
 Write-Host "Place .env next to the exe before running."

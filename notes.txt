@@ -1,3 +1,8 @@
-user add
-registeration for race and other
-dashboard - total racers, started, finished, table mai date, participants per race
+group by age category 3 different files
+s.no., name, age, start, mid, end, result
+
+
+
+
+
+s.no.,army number,rank,name,age,remarks

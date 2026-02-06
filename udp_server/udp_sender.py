@@ -27,7 +27,7 @@ from fastapi import FastAPI
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [mid-server] %(levelname)s: %(message)s')
 logger = logging.getLogger('udp_sender')
 
-END_HOST = os.getenv('END_HOST', '127.0.0.1')
+END_HOST = os.getenv('END_HOST', '192.168.1.10')
 END_PORT = int(os.getenv('END_PORT', '6000'))
 BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '8192'))
 
