@@ -19,7 +19,7 @@ from constants import FERNET_KEY_ROTATION_DAYS, EnvVars
 from basefunctions import (
     get_env_variable,
     hash_data_sha256,
-    get_current_timestamp_utc,
+    get_current_timestamp_IST,
     EncryptionError,
 )
 from models import EncryptionKey
@@ -122,7 +122,7 @@ class FernetManager:
         
         if active_key:
             # Check if key needs rotation
-            key_age_days = (get_current_timestamp_utc() - active_key.created_at).days
+            key_age_days = (get_current_timestamp_IST() - active_key.created_at).days
             
             if key_age_days >= FERNET_KEY_ROTATION_DAYS:
                 logger.warning(f"Encryption key is {key_age_days} days old, rotation recommended")
@@ -135,7 +135,7 @@ class FernetManager:
         new_key = EncryptionKey(
             key_hash=key_hash,
             is_active=True,
-            created_at=get_current_timestamp_utc()
+            created_at=get_current_timestamp_IST()
         )
         
         db.add(new_key)
@@ -162,7 +162,7 @@ class FernetManager:
         current_key = db.query(EncryptionKey).filter_by(is_active=True).first()
         if current_key:
             current_key.is_active = False  # type: ignore[assignment]
-            current_key.rotated_at = get_current_timestamp_utc()  # type: ignore[assignment]
+            current_key.rotated_at = get_current_timestamp_IST()  # type: ignore[assignment]
         
         # Create new key
         key_hash = hash_data_sha256(self.master_key.decode('utf-8'))
@@ -170,7 +170,7 @@ class FernetManager:
         new_key = EncryptionKey(
             key_hash=key_hash,
             is_active=True,
-            created_at=get_current_timestamp_utc()
+            created_at=get_current_timestamp_IST()
         )
         
         db.add(new_key)

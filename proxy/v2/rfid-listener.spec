@@ -1,12 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
 
 a = Analysis(
-    ['run_rfid_listener.py'],
+    ['rfid_listener.py'],
     pathex=[],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=collect_data_files('tzdata'),
+    hiddenimports=[
+        collect_submodules('fastapi')
+        + collect_submodules('uvicorn')
+        + collect_submodules('uvicorn.logging')
+        + collect_submodules('uvicorn.loops')
+        + collect_submodules('uvicorn.protocols')
+        + collect_submodules('uvicorn.protocols.http')
+        + collect_submodules('uvicorn.protocols.websockets')
+        + collect_submodules('httpx')
+        + collect_submodules('dotenv')
+        + ['tzdata']
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

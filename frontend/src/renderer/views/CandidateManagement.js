@@ -21,9 +21,11 @@ export function renderCandidateManagement(races = [], participants = [], selecte
             `).join('')}
           </select>
         </div>
-        <button class="dark-btn-primary" id="create-new-candidate-btn" style="padding: 12px 24px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; transition: all 0.3s ease;">
-          <span style="font-size: 1.2em;">+</span> Add Candidate
-        </button>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button class="dark-btn-primary" id="add-new-candidate-btn" style="padding: 12px 24px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; transition: all 0.3s ease;">
+            <span style="font-size: 1.2em;">＋</span> Add New Candidate
+          </button>
+        </div>
       </div>
 
       <!-- Candidates Grid -->
@@ -53,15 +55,21 @@ export function renderCandidateManagement(races = [], participants = [], selecte
             return `
               <div style="background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 16px; transition: all 0.3s ease; display: flex; align-items: center; gap: 20px;" class="candidate-card">
                 <!-- Candidate Info -->
-                <div style="flex: 1; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1.5fr; gap: 16px; align-items: center;">
+                <div style="flex: 1; display: grid; grid-template-columns: 2fr 1.2fr 1fr 1fr 0.8fr 0.8fr 1.5fr; gap: 16px; align-items: center;">
                   <!-- Name & Race -->
                   <div>
-                    <h3 style="color: #e2e8f0; margin: 0 0 4px 0; font-size: 16px; font-weight: 600;">${displayName}</h3>
+                    <h3 style="color: #e2e8f0; margin: 0 0 4px 0; font-size: 16px; font-weight: 600;">${p.rank || 'N/A'} ${displayName}</h3>
                     <div style="display: inline-block; padding: 2px 8px; background: #1e3a8a; border-radius: 3px; font-size: 10px; font-weight: 600; color: #60a5fa; text-transform: uppercase; letter-spacing: 0.5px;">
                       ${race ? race.name : 'Unknown'}
                     </div>
                   </div>
                   
+                  <!-- Army Number -->
+                  <div>
+                    <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 2px;">Army No</div>
+                    <span style="color: #cbd5e1; font-size: 13px;">${p.army_number || 'N/A'}</span>
+                  </div>
+
                   <!-- RFID -->
                   <div>
                     <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 2px;">RFID</div>
@@ -78,12 +86,6 @@ export function renderCandidateManagement(races = [], participants = [], selecte
                   <div>
                     <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 2px;">Gender</div>
                     <span style="color: #cbd5e1; font-size: 14px;">${p.gender === 'M' ? 'Male' : p.gender === 'F' ? 'Female' : (p.gender || 'Other')}</span>
-                  </div>
-                  
-                  <!-- Category -->
-                  <div>
-                    <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; margin-bottom: 2px;">Category</div>
-                    <span style="color: #cbd5e1; font-size: 14px;">${p.category || 'N/A'}</span>
                   </div>
                   
                   <!-- Registered -->
@@ -129,8 +131,8 @@ export function renderCandidateManagement(races = [], participants = [], selecte
         background: #dc2626;
         transform: scale(1.05);
       }
-      #create-new-candidate-btn:hover {
-        box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+      #add-new-candidate-btn:hover {
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
         transform: translateY(-1px);
       }
       #candidate-race-filter-dropdown:focus {

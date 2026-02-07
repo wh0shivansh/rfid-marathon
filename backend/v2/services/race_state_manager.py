@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from threading import Lock
 
-from basefunctions import get_current_timestamp_utc
+from basefunctions import get_current_timestamp_IST
 
 logger = logging.getLogger("rfid-marathon.race-state")
 
@@ -83,7 +83,7 @@ class RaceStateManager:
             "group_number": new_group_number,
             "rfids": [],
             "locked": False,
-            "created_at": get_current_timestamp_utc().isoformat(),
+            "created_at": get_current_timestamp_IST().isoformat(),
             "locked_at": None
         }
         groups.append(new_group)
@@ -167,7 +167,7 @@ class RaceStateManager:
             for group in groups:
                 if not group["locked"]:
                     group["locked"] = True
-                    group["locked_at"] = get_current_timestamp_utc().isoformat()
+                    group["locked_at"] = get_current_timestamp_IST().isoformat()
                     current_group = group
                     break
             
@@ -176,7 +176,7 @@ class RaceStateManager:
                 return
             
             # Set grace period end time
-            grace_end = get_current_timestamp_utc() + timedelta(seconds=grace_seconds)
+            grace_end = get_current_timestamp_IST() + timedelta(seconds=grace_seconds)
             self._state[race_id]["grace_period_ends_at"] = grace_end.isoformat()
             
             logger.info(
@@ -204,7 +204,7 @@ class RaceStateManager:
             for group in groups:
                 if not group["locked"]:
                     group["locked"] = True
-                    group["locked_at"] = get_current_timestamp_utc().isoformat()
+                    group["locked_at"] = get_current_timestamp_IST().isoformat()
                     locked_count += 1
             
             if locked_count > 0:

@@ -129,6 +129,8 @@ let scoreboardSelectedRaceId = null;
 let scoreboardSearchQuery = '';
 let scoreboardSortKey = 'durationMs';
 let scoreboardSortDir = 'asc';
+let scoreboardAgeFilter = '';
+let scoreboardRemarksFilter = '';
 
 // Race Start View state
 let raceStartSelectedRaceId = null;
@@ -157,6 +159,23 @@ async function apiRequest(path, options = {}) {
     method,
     headers,
     body: body ? JSON.stringify(body) : null,
+  });
+
+  const data = await response.json().catch(() => ({ success: false, message: "Bad JSON" }));
+  if (!response.ok || !data.success) {
+    throw new Error(data.message || `Request failed (${response.status})`);
+  }
+  return data.data;
+}
+
+async function apiUpload(path, formData, auth = true) {
+  const headers = {};
+  if (auth && state.auth.token) headers["Authorization"] = `Bearer ${state.auth.token}`;
+
+  const response = await fetch(`${state.config.apiBaseUrl}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
   });
 
   const data = await response.json().catch(() => ({ success: false, message: "Bad JSON" }));
@@ -222,15 +241,6 @@ function renderLogin() {
       </div>
     </div>
   `;
-}
-
-function showStartGroupStatus(message, type = 'info') {
-  const statusElement = document.getElementById('status-message');
-  if (statusElement) {
-    statusElement.innerHTML = message;
-    statusElement.className = `status-${type}`;
-    statusElement.style.display = 'block';
-  }
 }
 
 async function fetchRaces() {
@@ -359,26 +369,6 @@ async function registerRunner(formData) {
 // RACE CRUD OPERATIONS
 // ============================================================================
 
-async function createRace(raceData) {
-  return await globalLoader.wrap(async () => {
-    try {
-      await ensureAuth();
-      await apiRequest("/race", {
-        method: "POST",
-        body: raceData,
-      });
-      
-      showToast("Race created successfully", 'success');
-      await fetchRaces();
-      render();
-    } catch (err) {
-      console.error(err);
-      showToast(`Failed to create race: ${err.message}`, 'error');
-      throw err;
-    }
-  });
-}
-
 async function updateRace(raceId, updates) {
   return await globalLoader.wrap(async () => {
     try {
@@ -422,29 +412,6 @@ async function deleteRace(raceId) {
   });
 }
 
-async function startRace(raceId) {
-  return await globalLoader.wrap(async () => {
-    try {
-      await ensureAuth();
-      
-      // Send current timestamp from frontend
-      const startTime = new Date().toISOString();
-      
-      await apiRequest(`/race/${raceId}/start`, {
-        method: "POST",
-        body: { start_time: startTime }
-      });
-      
-      showToast("Race started successfully", 'success');
-      await fetchRaces();
-      render();
-    } catch (err) {
-      console.error(err);
-      showToast(`Failed to start race: ${err.message}`, 'error');
-      throw err;
-    }
-  });
-}
 
 async function endRace(raceId) {
   return await globalLoader.wrap(async () => {
@@ -474,26 +441,6 @@ async function endRace(raceId) {
   });
 }
 
-async function updateRaceStatus(raceId, status) {
-  return await globalLoader.wrap(async () => {
-    try {
-      await ensureAuth();
-      await apiRequest(`/race/${raceId}/status/update`, {
-        method: 'POST',
-        body: { status }
-      });
-
-      showToast(`Race status updated to ${status}`, 'success');
-      await fetchRaces();
-      render();
-    } catch (err) {
-      console.error(err);
-      showToast(`Failed to update race status: ${err.message}`, 'error');
-      throw err;
-    }
-  });
-}
-
 function renderSidebar() {
   return `
     <div class="sidebar">
@@ -501,9 +448,9 @@ function renderSidebar() {
       <nav class="sidebar-nav">
           <button class="nav-btn ${state.view === "dashboard" ? "active" : ""}" data-view="dashboard">Dashboard</button>
           <button class="nav-btn ${state.view === "races-management" ? "active" : ""}" data-view="races-management">Races Management</button>
-          <button class="nav-btn ${state.view === "race-start" ? "active" : ""}" data-view="race-start">Start Race</button>
-          <button class="nav-btn ${state.view === "register" ? "active" : ""}" data-view="register">Register</button>
           <button class="nav-btn ${state.view === "candidate-management" ? "active" : ""}" data-view="candidate-management">Candidate Management</button>
+          <button class="nav-btn ${state.view === "register" ? "active" : ""}" data-view="register">Register</button>
+          <button class="nav-btn ${state.view === "race-start" ? "active" : ""}" data-view="race-start">Start Race</button>
           <button class="nav-btn ${state.view === "scoreboard" ? "active" : ""}" data-view="scoreboard">Scoreboard</button>
       </nav>
       <div class="sidebar-meta">
@@ -603,7 +550,7 @@ async function render() {
         ${state.view === "race-start" ? renderRaceStart(state.races, raceStartSelectedRaceId) : ""}
         ${state.view === "register" ? renderRegister() : ""}
         ${state.view === "candidate-management" ? renderCandidateManagement(state.races, state.participants, candidateManagementSelectedRaceId) : ""}
-        ${state.view === "scoreboard" ? renderScoreboard(state.races, state.participants, scoreboardSelectedRaceId, { searchQuery: scoreboardSearchQuery, sortKey: scoreboardSortKey, sortDir: scoreboardSortDir }) : ""}
+        ${state.view === "scoreboard" ? renderScoreboard(state.races, state.participants, scoreboardSelectedRaceId, { searchQuery: scoreboardSearchQuery, sortKey: scoreboardSortKey, sortDir: scoreboardSortDir, ageFilter: scoreboardAgeFilter, remarksFilter: scoreboardRemarksFilter }) : ""}
       </div>
     </div>
   `;
@@ -1291,6 +1238,37 @@ function attachRegistrationWizardHandlers() {
     });
   }
 
+  // Step 2: Bulk upload
+  const bulkUploadBtn = document.getElementById('bulk-upload-btn');
+  const bulkUploadInput = document.getElementById('bulk-upload-input');
+  if (bulkUploadBtn && bulkUploadInput) {
+    bulkUploadBtn.addEventListener('click', () => {
+      const raceId = getSelectedRaceId();
+      if (!raceId) {
+        showToast('Select a race before uploading', 'warning');
+        return;
+      }
+      bulkUploadInput.click();
+    });
+
+    bulkUploadInput.addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const raceId = getSelectedRaceId();
+      if (!raceId) {
+        showToast('Select a race before uploading', 'warning');
+        bulkUploadInput.value = '';
+        return;
+      }
+
+      try {
+        await uploadBulkCandidates(raceId, file);
+      } finally {
+        bulkUploadInput.value = '';
+      }
+    });
+  }
+
   // Step 3: Back to step 2
   const backToStep2 = document.getElementById('back-to-step-2');
   if (backToStep2) {
@@ -1622,20 +1600,15 @@ function attachCandidateManagementHandlers() {
     });
   }
 
-  // Create New Candidate Button
-  const createNewCandidateBtn = document.getElementById('create-new-candidate-btn');
-  if (createNewCandidateBtn) {
-    createNewCandidateBtn.addEventListener('click', async () => {
-      // Open the registration view instead of an in-place modal
+  // Add New Candidate Button
+  const addNewCandidateBtn = document.getElementById('add-new-candidate-btn');
+  if (addNewCandidateBtn) {
+    addNewCandidateBtn.addEventListener('click', async () => {
+      state.view = 'register';
       state.registrationStep = 1;
       state.scannedRFID = null;
-      // If a race filter is selected, preselect it in the registration flow
-      state.selectedRace = candidateManagementSelectedRaceId || null;
-      // Ensure races are loaded for the registration page
+      state.selectedRace = null;
       await fetchRaces();
-      // Pre-populate per-race RFID set if a race was preselected
-      if (getSelectedRaceId()) await populateRFIDSetForRace(getSelectedRaceId());
-      state.view = 'register';
       render();
     });
   }
@@ -1730,6 +1703,9 @@ function attachScoreboardHandlers() {
     if (scoreboardRaceFilterDropdown) {
     scoreboardRaceFilterDropdown.addEventListener('change', async (e) => {
       scoreboardSelectedRaceId = e.target.value || null;
+      scoreboardAgeFilter = '';
+      scoreboardRemarksFilter = '';
+      scoreboardSearchQuery = '';
       await fetchParticipants(scoreboardSelectedRaceId, true);
       render();
     });
@@ -1756,6 +1732,43 @@ function attachScoreboardHandlers() {
     });
   }
 
+  // Age category filter
+  const scoreboardAgeFilterDropdown = document.getElementById('scoreboard-age-filter-dropdown');
+  if (scoreboardAgeFilterDropdown) {
+    scoreboardAgeFilterDropdown.addEventListener('change', (e) => {
+      scoreboardAgeFilter = e.target.value || '';
+      render();
+    });
+  }
+
+  // Remarks filter
+  const scoreboardRemarksFilterDropdown = document.getElementById('scoreboard-remarks-filter-dropdown');
+  if (scoreboardRemarksFilterDropdown) {
+    scoreboardRemarksFilterDropdown.addEventListener('change', (e) => {
+      scoreboardRemarksFilter = e.target.value || '';
+      render();
+    });
+  }
+
+  // Clear filters button
+  const clearFiltersBtn = document.getElementById('scoreboard-clear-filters');
+  if (clearFiltersBtn) {
+    clearFiltersBtn.addEventListener('click', () => {
+      scoreboardAgeFilter = '';
+      scoreboardRemarksFilter = '';
+      scoreboardSearchQuery = '';
+      render();
+    });
+  }
+
+  // Export results
+  const exportBtn = document.getElementById('export-scoreboard-btn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      exportScoreboardResults();
+    });
+  }
+
   // Column sort toggles
   const sortToggles = document.querySelectorAll('.scoreboard-sort-toggle');
   if (sortToggles && sortToggles.length) {
@@ -1775,26 +1788,220 @@ function attachScoreboardHandlers() {
   }
 }
 
+function areScoreboardFiltersActive() {
+  return Boolean(
+    (scoreboardSearchQuery && scoreboardSearchQuery.trim()) ||
+    scoreboardAgeFilter ||
+    scoreboardRemarksFilter
+  );
+}
+
+function getScoreboardExportRows() {
+  const table = document.getElementById('scoreboard-table');
+  if (!table) return null;
+  const rows = Array.from(table.querySelectorAll('tbody tr'));
+  return rows.map((row, index) => {
+    const cells = row.querySelectorAll('td');
+    if (!cells || cells.length < 10) return null;
+
+    const clean = (val) => String(val || '').replace(/\s+/g, ' ').trim();
+
+    return {
+      sno: String(index + 1),
+      army_number: clean(cells[1].textContent),
+      rank: clean(cells[2].textContent),
+      name: clean(cells[3].textContent),
+      age: clean(cells[4].textContent),
+      start: clean(cells[5].textContent),
+      mid: clean(cells[6].textContent),
+      end: clean(cells[7].textContent),
+      result: clean(cells[9].textContent)
+    };
+  }).filter(Boolean);
+}
+
+function buildScoreboardExportHtml(rows, title) {
+  const safeTitle = title || 'Scoreboard Export';
+  const bodyRows = rows.map(r => {
+    return `
+      <tr>
+        <td>${r.sno}</td>
+        <td>${r.army_number}</td>
+        <td>${r.rank}</td>
+        <td>${r.name}</td>
+        <td>${r.age}</td>
+        <td>${r.start}</td>
+        <td>${r.mid}</td>
+        <td>${r.end}</td>
+        <td>${r.result}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${safeTitle}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 24px; }
+          h1 { font-size: 18px; margin-bottom: 12px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { border: 1px solid #cccccc; padding: 6px 8px; text-align: left; }
+          th { background: #f3f4f6; }
+        </style>
+      </head>
+      <body>
+        <h1>${safeTitle}</h1>
+        <table>
+          <thead>
+            <tr>
+              <th>S.No.</th>
+              <th>Army Number</th>
+              <th>Rank</th>
+              <th>Name</th>
+              <th>Age</th>
+              <th>Start Time</th>
+              <th>Mid Time</th>
+              <th>End Time</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bodyRows}
+          </tbody>
+        </table>
+      </body>
+    </html>
+  `;
+}
+
+async function exportScoreboardResults() {
+  if (!scoreboardSelectedRaceId) {
+    showToast('Please select a completed race first', 'warning');
+    return;
+  }
+
+  const rows = getScoreboardExportRows();
+  if (!rows || rows.length === 0) {
+    showToast('No scoreboard rows to export', 'warning');
+    return;
+  }
+
+  if (areScoreboardFiltersActive()) {
+    const ok = confirm('Filters are applied. Export will include only the filtered results. Continue?');
+    if (!ok) return;
+  }
+
+  const formatSelect = document.getElementById('scoreboard-export-format');
+  const format = formatSelect ? formatSelect.value : 'excel';
+  const race = state.races.find(r => String(r.id) === String(scoreboardSelectedRaceId));
+  const baseTitle = race ? `Scoreboard - ${race.name}` : 'Scoreboard';
+  const baseName = race ? `scoreboard_${race.name.replace(/\s+/g, '_').toLowerCase()}` : 'scoreboard';
+  const sanitizePart = (val) => String(val || '')
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  const filterParts = [];
+  if (scoreboardAgeFilter) filterParts.push(`age-${sanitizePart(scoreboardAgeFilter)}`);
+  if (scoreboardRemarksFilter) filterParts.push(`remarks-${sanitizePart(scoreboardRemarksFilter)}`);
+  if (scoreboardSearchQuery && scoreboardSearchQuery.trim()) {
+    const searchPart = sanitizePart(scoreboardSearchQuery.trim()).slice(0, 24);
+    if (searchPart) filterParts.push(`search-${searchPart}`);
+  }
+  const filterSuffix = filterParts.length ? `_${filterParts.join('_')}` : '';
+  const titleSuffix = filterParts.length ? ` (filters: ${filterParts.join(', ')})` : '';
+  const exportTitle = `${baseTitle}${titleSuffix}`;
+  const fileBase = `${baseName}${filterSuffix}`;
+  const buildXlsx = window.secureApi?.buildXlsx;
+  const buildDocx = window.secureApi?.buildDocx;
+  const buildPdf = window.secureApi?.buildPdf;
+
+  const downloadBlob = (content, filename, type) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  if (format === 'excel') {
+    if (!buildXlsx) {
+      showToast('Excel export is unavailable (XLSX not loaded)', 'error');
+      return;
+    }
+    const header = ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result'];
+    const aoa = [
+      header,
+      ...rows.map(r => [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result])
+    ];
+    const xlsxArray = buildXlsx(aoa, 'Scoreboard');
+    if (!xlsxArray) {
+      showToast('Excel export failed (workbook empty)', 'error');
+      return;
+    }
+    downloadBlob(xlsxArray, `${fileBase}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    return;
+  }
+
+  if (format === 'word') {
+    if (!buildDocx) {
+      showToast('Word export is unavailable (DOCX not loaded)', 'error');
+      return;
+    }
+    const headers = ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result'];
+    const dataRows = rows.map(r => [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result]);
+    const docxArray = await buildDocx(headers, dataRows, exportTitle);
+    if (!docxArray) {
+      showToast('Word export failed', 'error');
+      return;
+    }
+    downloadBlob(docxArray, `${fileBase}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    return;
+  }
+
+  if (format === 'pdf') {
+    if (!buildPdf) {
+      showToast('PDF export is unavailable (PDF library not loaded)', 'error');
+      return;
+    }
+    const headers = ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result'];
+    const dataRows = rows.map(r => [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result]);
+    const pdfArray = await buildPdf(headers, dataRows, exportTitle);
+    if (!pdfArray) {
+      showToast('PDF export failed', 'error');
+      return;
+    }
+    downloadBlob(pdfArray, `${fileBase}.pdf`, 'application/pdf');
+  }
+}
+
 // ============================================================================
 // CANDIDATE CRUD OPERATIONS (Using existing /participant/register endpoint)
 // ============================================================================
 
-async function createCandidate(candidateData) {
+async function uploadBulkCandidates(raceId, file) {
   return await globalLoader.wrap(async () => {
     try {
       await ensureAuth();
-      // Use existing /participant/register endpoint
-      await apiRequest('/participant/register', {
-        method: 'POST',
-        body: candidateData,
-      });
-      
-      showToast('Candidate created successfully', 'success');
+      const formData = new FormData();
+      formData.append('file', file);
+
+      await apiUpload(`/races/${raceId}/bulk-upload`, formData);
+
+      showToast('Bulk upload completed', 'success');
       await fetchParticipants(candidateManagementSelectedRaceId);
       render();
     } catch (err) {
       console.error(err);
-      showToast(`Failed to create candidate: ${err.message}`, 'error');
+      showToast(`Bulk upload failed: ${err.message}`, 'error', 10000);
       throw err;
     }
   });
@@ -2326,8 +2533,9 @@ async function handleRaceStartSubmit(event) {
   document.body.appendChild(modalContainer);
 
   // Get modal elements
-  const modal = document.getElementById('race-start-time-modal');
-  const timeInput = document.getElementById('race-start-time');
+  const timeInputUp30 = document.getElementById('race-start-time-up30');
+  const timeInputUpto40 = document.getElementById('race-start-time-upto40');
+  const timeInput40_45 = document.getElementById('race-start-time-40-45');
   const cancelBtn = document.getElementById('cancel-start-time-btn');
   const confirmBtn = document.getElementById('confirm-start-time-btn');
 
@@ -2338,10 +2546,12 @@ async function handleRaceStartSubmit(event) {
 
   // Handle confirm
   confirmBtn.addEventListener('click', async () => {
-    const selectedTime = timeInput.value;
+    const selectedUp30 = timeInputUp30.value;
+    const selectedUpto40 = timeInputUpto40.value;
+    const selected40_45 = timeInput40_45.value;
 
-    if (!selectedTime) {
-      showToast('Please select a time', 'warning');
+    if (!selectedUp30 || !selectedUpto40 || !selected40_45) {
+      showToast('Please select all start times', 'warning');
       return;
     }
 
@@ -2349,8 +2559,13 @@ async function handleRaceStartSubmit(event) {
     const datePart = scheduledDateIso
       ? new Date(scheduledDateIso).toISOString().split('T')[0]
       : new Date().toISOString().split('T')[0];
-    const startDateTime = new Date(`${datePart}T${selectedTime}:00`);
-    const startTimeIso = startDateTime.toISOString();
+    const up30DateTime = new Date(`${datePart}T${selectedUp30}:00`);
+    const upto40DateTime = new Date(`${datePart}T${selectedUpto40}:00`);
+    const start40_45DateTime = new Date(`${datePart}T${selected40_45}:00`);
+
+    const up30Iso = up30DateTime.toISOString();
+    const upto40Iso = upto40DateTime.toISOString();
+    const start40_45Iso = start40_45DateTime.toISOString();
 
     // Remove modal
     modalContainer.remove();
@@ -2360,13 +2575,20 @@ async function handleRaceStartSubmit(event) {
       try {
         await ensureAuth();
         
-        // Call backend API to start the race with the selected time
-        await apiRequest(`/race/${raceStartSelectedRaceId}/start`, {
+        // Save age-based start times
+        await apiRequest(`/race/${raceStartSelectedRaceId}/start-times`, {
           method: 'POST',
-          body: { start_time: startTimeIso }
+          body: {
+            up30start_time: up30Iso,
+            upto40start_time: upto40Iso,
+            '40_45start_time': start40_45Iso,
+          }
         });
-        
-        raceStartTime = new Date();
+
+        // Activate the race
+        await apiRequest(`/race/${raceStartSelectedRaceId}/start`, {
+          method: 'POST'
+        });
         showToast('Race started successfully', 'success');
         
         // Refresh races and re-render to update button state
@@ -2453,6 +2675,23 @@ function formatDuration(milliseconds) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+function getRaceStartTimes(race) {
+  if (!race) return [];
+  const times = [
+    race.up30start_time,
+    race.upto40start_time,
+    race['40_45start_time'],
+    race.start_time_40_45,
+  ];
+  return times.filter(Boolean).map(t => new Date(t));
+}
+
+function getEarliestStartTime(race) {
+  const times = getRaceStartTimes(race);
+  if (!times.length) return null;
+  return new Date(Math.min(...times.map(t => t.getTime())));
+}
+
 function updateDurationDisplay() {
   if (!raceStartSelectedRaceId || !state.races) return;
   
@@ -2464,15 +2703,16 @@ function updateDurationDisplay() {
   
   if (!durationContainer || !durationDisplay) return;
   
-  // Only show duration if race has start_time
-  if (!selectedRace.start_time) {
+  const earliestStart = getEarliestStartTime(selectedRace);
+  // Only show duration if race has start times
+  if (!earliestStart) {
     durationContainer.style.display = 'none';
     return;
   }
   
   durationContainer.style.display = 'block';
   
-  const startTime = new Date(selectedRace.start_time);
+  const startTime = earliestStart;
   let duration;
   
   // If race is completed, use end_time - start_time (static)
@@ -2491,11 +2731,11 @@ function startDurationClock() {
   // Clear existing interval if any
   stopDurationClock();
   
-  // Only start if selected race has start_time
+  // Only start if selected race has start times
   if (!raceStartSelectedRaceId || !state.races) return;
   
   const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
-  if (!selectedRace || !selectedRace.start_time) return;
+  if (!selectedRace || !getEarliestStartTime(selectedRace)) return;
   
   // Update immediately
   updateDurationDisplay();
@@ -2539,13 +2779,19 @@ function updateRaceDetailsDisplay() {
   
   // Format start and end times if available
   let timingInfo = '';
-  if (selectedRace.start_time) {
-    const startTime = new Date(selectedRace.start_time).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-    timingInfo += `<div style="margin-top: 4px; font-size: 12px; color: #94a3b8;">Started: ${startTime}</div>`;
+  const up30 = selectedRace.up30start_time ? new Date(selectedRace.up30start_time) : null;
+  const upto40 = selectedRace.upto40start_time ? new Date(selectedRace.upto40start_time) : null;
+  const start40_45 = selectedRace['40_45start_time']
+    ? new Date(selectedRace['40_45start_time'])
+    : (selectedRace.start_time_40_45 ? new Date(selectedRace.start_time_40_45) : null);
+
+  if (up30 || upto40 || start40_45) {
+    const fmt = (d) => d ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit'}) : 'N/A';
+    timingInfo += `
+      <div style="margin-top: 4px; font-size: 12px; color: #94a3b8;">
+        upto 30: ${fmt(up30)}<br>upto 40: ${fmt(upto40)}<br>41-45: ${fmt(start40_45)}
+      </div>
+    `;
   }
   
   if (selectedRace.end_time) {

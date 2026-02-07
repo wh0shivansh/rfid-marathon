@@ -1,18 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
-
 a = Analysis(
-    ['udp_listener.py'],
+    ['control_hub.py'],
     pathex=[],
     binaries=[],
-    datas=collect_data_files('tzdata'),
-    hiddenimports=(
-        collect_submodules('requests')
-        + collect_submodules('dotenv')
-        + ['tzdata']
-    ),
+    datas=[],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -27,7 +21,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='udp-listener',
+    name='control-hub',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -46,5 +40,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='udp-listener',
+    name='control-hub',
 )

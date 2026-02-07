@@ -68,11 +68,7 @@ DB_CONNECTION_TIMEOUT_SECONDS: Final[int] = 10
 # TABLE NAMES
 # ============================================================================
 
-TABLE_USERS: Final[str] = "users"
 TABLE_RACES: Final[str] = "races"
-TABLE_RFID_MAPPING: Final[str] = "rfid_mapping"
-TABLE_AUDIT_LOG: Final[str] = "audit_log"
-TABLE_NONCE_CACHE: Final[str] = "nonce_cache"
 TABLE_ENCRYPTION_KEYS: Final[str] = "encryption_keys"
 
 # ============================================================================
@@ -108,9 +104,6 @@ HTTP_INTERNAL_ERROR: Final[int] = 500
 RFID_LISTENER_PORT: Final[int] = 9090
 RFID_LISTENER_HOST: Final[str] = "0.0.0.0"
 
-# Grace period for late arrivals (seconds) - candidates can still be added during this window
-RFID_GRACE_PERIOD_SECONDS: Final[int] = int(os.getenv("RFID_GRACE_PERIOD_SECONDS", 120)) # Default 2 minutes
-
 # Minimum read count to be considered a valid candidate
 RFID_MIN_READ_COUNT_TO_LOCK: Final[int] = int(os.getenv("RFID_MIN_READ_COUNT_TO_LOCK", 3))
 
@@ -118,14 +111,12 @@ RFID_MIN_READ_COUNT_TO_LOCK: Final[int] = int(os.getenv("RFID_MIN_READ_COUNT_TO_
 RFID_NO_HIT_TIMEOUT_SECONDS: Final[int] = int(os.getenv("RFID_NO_HIT_TIMEOUT_SECONDS", 20))
 
 # ============================================================================
-# RACE STATE CONSTANTS (BACKEND ONLY)
+# PARTICIPANT BULK-UPLOAD CONSTANTS
 # ============================================================================
 
-# Race state persistence - BACKEND ONLY, NOT used by listener (9090)
-# The listener is now stateless and forwards all RFID hits directly to backend
-# Backend manages all race state (groups, grace periods, locking) via this file
-RACE_STATE_FILE: Final[str] = "race_state.json"  # Relative to backend root
-RACE_STATE_DEDUPLICATION: Final[bool] = True  # Prevent duplicate RFIDs in same group
+BULK_HEADERS = ["s.no", "army number", "rank", "name", "age", "remarks"]
+RFID_PREFIX = "315354010100000000000" # Last 3 digits are incremented for each participant in bulk upload
+
 
 # ============================================================================
 # TIMING CONSTANTS
@@ -318,7 +309,7 @@ PATTERN_ALPHANUMERIC = r"^[a-zA-Z0-9]+$"
 # ============================================================================
 
 SYSTEM_NAME: Final[str] = "RFID Marathon Management System"
-SYSTEM_VERSION: Final[str] = "1.0.0"
+SYSTEM_VERSION: Final[str] = "2.0.0-alpha"
 SYSTEM_ENV: Final[str] = "production"  # Default to production for safety
 SECURITY_LEVEL: Final[str] = "military-grade"
 

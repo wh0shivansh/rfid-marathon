@@ -21,7 +21,7 @@ from basefunctions import (
     NotFoundError,
     ConflictError,
     ValidationError,
-    get_current_timestamp_utc,
+    get_current_timestamp_IST,
     iso8601_to_timestamp,
 )
 from constants import (
@@ -333,7 +333,7 @@ class RaceService:
 
                 setattr(race, field, value)
         
-        race.updated_at = get_current_timestamp_utc()  # type: ignore[assignment]
+        race.updated_at = get_current_timestamp_IST()  # type: ignore[assignment]
         
         db.commit()
         db.refresh(race)
@@ -382,12 +382,12 @@ class RaceService:
             if existing_active and str(existing_active.id) != str(race_id):
                 # demote the existing active race to CREATED (system action)
                 setattr(existing_active, "status", RaceStatus.CREATED.value)
-                setattr(existing_active, "updated_at", get_current_timestamp_utc())
+                setattr(existing_active, "updated_at", get_current_timestamp_IST())
                 db.add(existing_active)
 
             # Now promote the target race to ACTIVE
             setattr(race, "status", RaceStatus.ACTIVE.value)
-            setattr(race, "updated_at", get_current_timestamp_utc())
+            setattr(race, "updated_at", get_current_timestamp_IST())
 
             db.commit()
             db.refresh(race)
@@ -400,12 +400,12 @@ class RaceService:
             existing_active = db.query(Race).filter_by(status=RaceStatus.ACTIVE.value).with_for_update().first()
             if existing_active and str(existing_active.id) != str(race_id):
                 setattr(existing_active, "status", RaceStatus.CREATED.value)
-                setattr(existing_active, "updated_at", get_current_timestamp_utc())
+                setattr(existing_active, "updated_at", get_current_timestamp_IST())
                 db.add(existing_active)
 
             # Promote target race to STARTED
             setattr(race, "status", RaceStatus.STARTED.value)
-            setattr(race, "updated_at", get_current_timestamp_utc())
+            setattr(race, "updated_at", get_current_timestamp_IST())
             db.commit()
             db.refresh(race)
             logger.info(f"✓ Started race: {race_id} (demoted existing active if present)")
@@ -414,7 +414,7 @@ class RaceService:
         # Handle completing a race (allowed from created, active, or started per transition map)
         if new_status == RaceStatus.COMPLETED:
             setattr(race, "status", RaceStatus.COMPLETED.value)
-            setattr(race, "updated_at", get_current_timestamp_utc())
+            setattr(race, "updated_at", get_current_timestamp_IST())
             db.commit()
             db.refresh(race)
             logger.info(f"✓ Completed race: {race_id} (from {current_status.value})")
@@ -426,7 +426,7 @@ class RaceService:
                 raise ValidationError("Setting status to 'created' is a system-only rollback")
 
             setattr(race, "status", RaceStatus.CREATED.value)
-            setattr(race, "updated_at", get_current_timestamp_utc())
+            setattr(race, "updated_at", get_current_timestamp_IST())
             db.commit()
             db.refresh(race)
             logger.info(f"✓ Rolled back race to created: {race_id} (from {current_status.value})")

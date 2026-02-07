@@ -8,7 +8,6 @@ This module handles race management operations.
 
 import logging
 from typing import List, Optional
-from datetime import datetime
 import uuid
 import re
 
@@ -16,13 +15,13 @@ from sqlalchemy import text
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from models import Race, Participant
+from models import Race
 from services.fernet_manager import get_fernet_manager
 from basefunctions import (
     NotFoundError,
     ConflictError,
     ValidationError,
-    get_current_timestamp_utc,
+    get_current_timestamp_IST,
     iso8601_to_timestamp,
 )
 from constants import (
@@ -226,6 +225,10 @@ class RaceService:
                     id UUID PRIMARY KEY,
                     race_id UUID NOT NULL REFERENCES races(id) ON DELETE CASCADE,
                     rfid_tag VARCHAR(32) NOT NULL,
+                    s_no INTEGER NULL,
+                    army_number VARCHAR(64) NULL,
+                    rank VARCHAR(64) NULL,
+                    remarks TEXT NULL,
                     encrypted_name TEXT NOT NULL,
                     age INTEGER,
                     gender VARCHAR(1) NOT NULL,
@@ -280,7 +283,7 @@ class RaceService:
         rows = db.execute(
             text(
                 f"""
-                SELECT rfid_tag, encrypted_name, age, gender, category, encryption_key_id
+                SELECT rfid_tag, s_no, army_number, rank, remarks, encrypted_name, age, gender, category, encryption_key_id
                 FROM "{source_table}"
                 WHERE race_id = :race_id
                 """
@@ -295,11 +298,15 @@ class RaceService:
         payloads = []
         for row in rows:
             rfid_tag = getattr(row, "rfid_tag", None) or row[0]
-            encrypted_name = getattr(row, "encrypted_name", None) or row[1]
-            age = getattr(row, "age", None) or row[2]
-            gender = getattr(row, "gender", None) or row[3]
-            category = getattr(row, "category", None) or row[4]
-            encryption_key_id = getattr(row, "encryption_key_id", None) or row[5]
+            s_no = getattr(row, "s_no", None) or row[1]
+            army_number = getattr(row, "army_number", None) or row[2]
+            rank = getattr(row, "rank", None) or row[3]
+            remarks = getattr(row, "remarks", None) or row[4]
+            encrypted_name = getattr(row, "encrypted_name", None) or row[5]
+            age = getattr(row, "age", None) or row[6]
+            gender = getattr(row, "gender", None) or row[7]
+            category = getattr(row, "category", None) or row[8]
+            encryption_key_id = getattr(row, "encryption_key_id", None) or row[9]
 
             if not encryption_key_id:
                 key_record = fernet_manager.get_or_create_active_key(db)
@@ -309,6 +316,10 @@ class RaceService:
                 "id": str(uuid.uuid4()),
                 "race_id": str(target_race.id),
                 "rfid_tag": rfid_tag,
+                "s_no": s_no,
+                "army_number": army_number,
+                "rank": rank,
+                "remarks": remarks,
                 "encrypted_name": encrypted_name,
                 "age": age,
                 "gender": gender,
@@ -320,8 +331,8 @@ class RaceService:
             insert_sql = text(
                 f"""
                 INSERT INTO "{target_table}"
-                (id, race_id, rfid_tag, encrypted_name, age, gender, category, encryption_key_id, registered_at)
-                VALUES (:id, :race_id, :rfid_tag, :encrypted_name, :age, :gender, :category, :encryption_key_id, NOW())
+                (id, race_id, rfid_tag, s_no, army_number, rank, remarks, encrypted_name, age, gender, category, encryption_key_id, registered_at)
+                VALUES (:id, :race_id, :rfid_tag, :s_no, :army_number, :rank, :remarks, :encrypted_name, :age, :gender, :category, :encryption_key_id, NOW())
                 """
             )
             db.execute(insert_sql, payloads)
@@ -403,7 +414,7 @@ class RaceService:
         allowed_fields = [
             'name', 'distance_meters', 'location',
             'scheduled_date', 'description', 'status',
-            'start_time', 'mid_time', 'end_time'
+            'up30start_time', 'upto40start_time', 'start_time_40_45', 'end_time'
         ]
         
         for field, value in updates.items():
@@ -426,7 +437,7 @@ class RaceService:
 
                 setattr(race, field, value)
         
-        race.updated_at = get_current_timestamp_utc()  # type: ignore[assignment]
+        race.updated_at = get_current_timestamp_IST()  # type: ignore[assignment]
         
         db.commit()
         db.refresh(race)
@@ -471,7 +482,7 @@ class RaceService:
         if new_status == RaceStatus.STARTED:
             # Promote target race to STARTED
             setattr(race, "status", RaceStatus.STARTED.value)
-            setattr(race, "updated_at", get_current_timestamp_utc())
+            setattr(race, "updated_at", get_current_timestamp_IST())
             db.commit()
             db.refresh(race)
             logger.info(f"✓ Started race: {race_id} (from {current_status.value})")
@@ -480,7 +491,7 @@ class RaceService:
         # Handle completing a race (allowed from created, or started per transition map)
         if new_status == RaceStatus.COMPLETED:
             setattr(race, "status", RaceStatus.COMPLETED.value)
-            setattr(race, "updated_at", get_current_timestamp_utc())
+            setattr(race, "updated_at", get_current_timestamp_IST())
             db.commit()
             db.refresh(race)
             logger.info(f"✓ Completed race: {race_id} (from {current_status.value})")
@@ -492,7 +503,7 @@ class RaceService:
                 raise ValidationError("Setting status to 'created' is a system-only rollback")
 
             setattr(race, "status", RaceStatus.CREATED.value)
-            setattr(race, "updated_at", get_current_timestamp_utc())
+            setattr(race, "updated_at", get_current_timestamp_IST())
             db.commit()
             db.refresh(race)
             logger.info(f"✓ Rolled back race to created: {race_id} (from {current_status.value})")

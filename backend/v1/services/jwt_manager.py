@@ -25,7 +25,7 @@ from constants import (
 )
 from basefunctions import (
     get_env_variable,
-    get_current_timestamp_utc,
+    get_current_timestamp_IST,
     iso8601_to_timestamp,
     is_timestamp_within_window,
     generate_nonce,
@@ -69,7 +69,7 @@ class JWTManager:
         Returns:
             str: JWT token
         """
-        now = get_current_timestamp_utc()
+        now = get_current_timestamp_IST()
         expiry = now + timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
         
         payload = {
@@ -104,7 +104,7 @@ class JWTManager:
         Returns:
             str: JWT refresh token
         """
-        now = get_current_timestamp_utc()
+        now = get_current_timestamp_IST()
         expiry = now + timedelta(days=JWT_REFRESH_TOKEN_EXPIRE_DAYS)
         
         payload = {
@@ -248,7 +248,7 @@ class JWTManager:
             raise ReplayAttackError()
         
         # Store nonce in cache
-        current_time = get_current_timestamp_utc()
+        current_time = get_current_timestamp_IST()
         expiry_time = current_time + timedelta(seconds=REPLAY_ATTACK_WINDOW_SECONDS)
         
         nonce_entry = NonceCache(
@@ -273,7 +273,7 @@ class JWTManager:
         Returns:
             int: Number of nonces cleaned up
         """
-        current_time = get_current_timestamp_utc()
+        current_time = get_current_timestamp_IST()
         
         deleted_count = db.query(NonceCache).filter(
             NonceCache.expires_at < current_time

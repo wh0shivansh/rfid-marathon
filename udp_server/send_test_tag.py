@@ -16,6 +16,7 @@ load_dotenv()
 
 HOST = "127.0.0.1"
 PORT = 6000
+READER_NAME = os.getenv('READER_NAME', 'Reader 3')
 
 payload = {
     "epc": "315354010100000000000014",
@@ -27,8 +28,23 @@ payload = {
 }
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-msg = json.dumps(payload).encode('utf-8')
-# print(f"Sending test tag to {HOST}:{PORT}: {payload}")
-s.sendto(msg, (HOST, PORT))
-print(f"Sent {payload} to {HOST}:{PORT}")
+
+# send bulk of tags with timestamps to mimic udp_sender batching
+batch = []
+now_ms = lambda: int(time.time() * 1000)
+for i in range(11, 21):
+  batch.append({
+    "epc": f"315354010100000000000{str(i).zfill(3)}",
+    "ft": now_ms(),
+    "lt": now_ms()
+  })
+
+bulk_msg = json.dumps({
+  "event_type": "tag_read",
+  "event_data": batch,
+  "reader_name": READER_NAME
+}).encode('utf-8')
+
+s.sendto(bulk_msg, (HOST, PORT))
+print(f"Sent bulk of {len(batch)} tags to {HOST}:{PORT}")
 s.close()

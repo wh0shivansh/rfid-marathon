@@ -1,11 +1,19 @@
-# Build a standalone Windows .exe for backend v2
+# Build a standalone Windows .exe for UDP server
 # Usage (from PowerShell):
-#   Set-Location e:\Innogative\udp-marathon\backend\v2
-#   .\build_exe.ps1
+#   Set-Location e:\Innogative\udp-marathon\udp_server
+#   .\build_udp_server.ps1
 
 $ErrorActionPreference = "Stop"
 
 Set-Location $PSScriptRoot
+
+# check if the file exist then delete the folder
+if (Test-Path "..\RFID-Marathon-Automation\udp-listener") {
+    Remove-Item "..\RFID-Marathon-Automation\udp-listener" -Recurse -Force
+}
+if (Test-Path "..\RFID-Marathon-Automation\udp-sender") {
+    Remove-Item "..\RFID-Marathon-Automation\udp-sender" -Recurse -Force
+}
 
 # Create a clean virtual environment for reproducible builds (optional)
 if (-not (Test-Path ".venv")) {
@@ -19,10 +27,15 @@ python -m pip install -r requirements.txt
 python -m pip install pyinstaller
 
 # Build one-folder executables using spec files
-pyinstaller --noconfirm --name udp-listener udp_listener.py
-Write-Host "Listener Build complete. Output: dist\udp-listener\udp-listener.exe"
+pyinstaller --noconfirm --clean udp-listener.spec
+pyinstaller --noconfirm --clean udp-sender.spec
 
-pyinstaller --noconfirm --name udp-sender udp_sender.py
-Write-Host "Sender Build complete. Output: dist\udp-sender\udp-sender.exe"
+Write-Host "Placing .env next to the exe."
+Copy-Item -Path ".env" -Destination "dist\udp-listener\" -Force
+Copy-Item -Path ".env" -Destination "dist\udp-sender\" -Force
 
-Write-Host "Place .env next to the exe before running."
+Write-Host "Moving dist folder to root level"
+Move-Item -Path "dist\udp-listener" -Destination "..\RFID-Marathon-Automation" -Force
+Move-Item -Path "dist\udp-sender" -Destination "..\RFID-Marathon-Automation" -Force
+Remove-Item "dist" -Recurse -Force
+Remove-Item "build" -Recurse -Force

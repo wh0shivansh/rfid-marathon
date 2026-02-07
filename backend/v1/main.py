@@ -63,7 +63,7 @@ from basefunctions import (
     NotFoundError,
     ConflictError,
     ApplicationError,
-    get_current_timestamp_utc,
+    get_current_timestamp_IST,
 )
 
 logger = logging.getLogger("rfid-marathon")
@@ -553,9 +553,9 @@ async def start_race(
             current_timestamp = parser.isoparse(start_time_str)
         except Exception as e:
             logger.warning(f"Failed to parse start_time from frontend: {e}, using backend time")
-            current_timestamp = get_current_timestamp_utc()
+            current_timestamp = get_current_timestamp_IST()
     else:
-        current_timestamp = get_current_timestamp_utc()
+        current_timestamp = get_current_timestamp_IST()
     
     timestamp_iso = current_timestamp.isoformat()
 
@@ -600,7 +600,7 @@ async def end_race(
     """
     try:
         # Get current time for end_time
-        end_timestamp = get_current_timestamp_utc()
+        end_timestamp = get_current_timestamp_IST()
         
         # Update race status and set end_time
         race = race_service.update_race(
@@ -1139,9 +1139,9 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
                 # logger.info(f"[RFID_START] Using proxy timestamp: {hit_timestamp}")
             except Exception as e:
                 logger.warning(f"[RFID_START] Failed to parse hit_timestamp '{hit_timestamp}': {e}; using current time")
-                current_time = get_current_timestamp_utc()
+                current_time = get_current_timestamp_IST()
         else:
-            current_time = get_current_timestamp_utc()
+            current_time = get_current_timestamp_IST()
             # logger.debug(f"[RFID_START] No proxy timestamp provided; using backend time: {current_time}")
         
         # Find the active race
@@ -1352,9 +1352,9 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
                 # logger.info(f"[RFID_END] Using proxy timestamp: {hit_timestamp}")
             except Exception as e:
                 logger.warning(f"[RFID_END] Failed to parse hit_timestamp '{hit_timestamp}': {e}; using current time")
-                current_time = get_current_timestamp_utc()
+                current_time = get_current_timestamp_IST()
         else:
-            current_time = get_current_timestamp_utc()
+            current_time = get_current_timestamp_IST()
             logger.debug(f"[RFID_END] No proxy timestamp provided; using backend time: {current_time}")
         
         # Find the active race
@@ -1523,7 +1523,7 @@ async def record_rfid_start_from_listener(
         current_status = getattr(participant_row, "status", "registered")
         existing_start_time = getattr(participant_row, "start_time", None)
         
-        current_time = get_current_timestamp_utc()
+        current_time = get_current_timestamp_IST()
         
         # CASE 1: Race is NOT started
         if race_status != "started":
@@ -1667,7 +1667,7 @@ async def record_rfid_end_from_listener(
         target = max(candidates, key=lambda c: c["start_time"]) if len(candidates) > 1 else candidates[0]
         db.execute(
             text(f"UPDATE \"{target['table']}\" SET end_time = :ts WHERE id = :pid"),
-            {"ts": get_current_timestamp_utc().isoformat(), "pid": target["pid"]}
+            {"ts": get_current_timestamp_IST().isoformat(), "pid": target["pid"]}
         )
         db.commit()
         
@@ -1719,7 +1719,7 @@ async def record_rfid_end_from_listener(
 #         table_name_value = getattr(race, "table_name", None)
 #         table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
         
-#         current_timestamp = get_current_timestamp_utc()
+#         current_timestamp = get_current_timestamp_IST()
 #         timestamp_iso = current_timestamp.isoformat()
         
 #         # Update all participants with status='grace' to set their start_time

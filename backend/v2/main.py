@@ -11,22 +11,30 @@ Main entrypoint for the backend API with:
 """
 
 import logging
-import time
-import threading
+import os
+import re
+import sys
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, tzinfo
+from io import BytesIO
 from dateutil import parser
 from zoneinfo import ZoneInfo
+from pathlib import Path
+from multiprocessing import freeze_support
 from typing import Optional, Any, cast
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Body
+import pandas as pd
+from docx import Document
+
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Body, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from sqlalchemy.engine import Result, CursorResult
 
-from constants import API_PREFIX, RaceStatus, RACE_STATUS_TRANSITIONS, ErrorMessages, FeatureFlags
+from constants import API_PREFIX, RaceStatus, RACE_STATUS_TRANSITIONS, ErrorMessages, FeatureFlags, BULK_HEADERS, RFID_PREFIX
 from database.connection import (
     initialize_database,
     shutdown_database,
@@ -49,12 +57,11 @@ from models import (
     ParticipantLookupRequest,
     RFIDHitRequest,
     RFIDBulkRequest,
-    RaceStartRequest,
+    RaceStartTimesRequest,
     RaceResponse,
     DashboardDataResponse,
     ParticipantResponse,
     RFIDHitResponse,
-    RaceStartResponse,
 )
 from basefunctions import (
     create_success_response,
@@ -64,7 +71,8 @@ from basefunctions import (
     NotFoundError,
     ConflictError,
     ApplicationError,
-    get_current_timestamp_utc,
+    get_current_timestamp_IST,
+    validate_rfid_tag,
 )
 
 logger = logging.getLogger("rfid-marathon")
@@ -89,7 +97,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RFID Marathon Management System",
-    version="1.0.0",
+    version="2.0.0-alpha",
     description="Military-grade, audit-ready marathon timing backend",
     docs_url=f"{API_PREFIX}/docs",
     openapi_url=f"{API_PREFIX}/openapi.json",
@@ -395,7 +403,7 @@ async def list_races(
     _user=Depends(get_current_user)
 ):
     races = race_service.list_races(db=db, status=status_filter)
-    response = [RaceResponse.model_validate(r, from_attributes=True).model_dump() for r in races]
+    response = [RaceResponse.model_validate(r, from_attributes=True).model_dump(by_alias=True) for r in races]
     return create_success_response(response)
 
 
@@ -487,7 +495,10 @@ async def get_dashboard_data(
 @app.get(f"{API_PREFIX}/race/{{race_id}}")
 async def get_race(race_id: str, db: Session = Depends(get_db_session), user=Depends(get_current_user)):
     race = race_service.get_race(db=db, race_id=race_id)
-    return create_success_response(RaceResponse.from_orm(race).dict())
+
+    if getattr(race, "status", None) != RaceStatus.CREATED.value:
+        raise ConflictError("Start times can only be updated before the race starts")
+    return create_success_response(RaceResponse.from_orm(race).dict(by_alias=True))
 
 
 @app.patch(f"{API_PREFIX}/race/{{race_id}}")
@@ -499,7 +510,7 @@ async def update_race(
 ):
     updates = payload.model_dump(exclude_unset=True)
     race = race_service.update_race(db=db, race_id=race_id, **updates)
-    return create_success_response(RaceResponse.from_orm(race).dict())
+    return create_success_response(RaceResponse.from_orm(race).dict(by_alias=True))
 
 
 @app.delete(f"{API_PREFIX}/race/{{race_id}}")
@@ -521,10 +532,40 @@ async def delete_race(
     return create_success_response({"message": "Race deleted successfully"})
 
 
+@app.post(f"{API_PREFIX}/race/{{race_id}}/start-times")
+async def update_race_start_times(
+    race_id: str,
+    payload: RaceStartTimesRequest,
+    db: Session = Depends(get_db_session),
+    _user=Depends(get_current_user)
+):
+    """Set per-age start times for a race."""
+    race = race_service.get_race(db=db, race_id=race_id)
+
+    try:
+        up30_time = parser.isoparse(payload.up30start_time)
+        upto40_time = parser.isoparse(payload.upto40start_time)
+        start_40_45_time = parser.isoparse(payload.start_time_40_45)
+    except Exception as exc:
+        raise ValidationError(f"Invalid start time format: {exc}")
+
+    race = race_service.update_race(
+        db=db,
+        race_id=race_id,
+        up30start_time=up30_time,
+        upto40start_time=upto40_time,
+        start_time_40_45=start_40_45_time,
+    )
+
+    return create_success_response({
+        "message": "Race start times updated",
+        "race": RaceResponse.from_orm(race).dict(by_alias=True)
+    })
+
+
 @app.post(f"{API_PREFIX}/race/{{race_id}}/start")
 async def start_race(
     race_id: str,
-    payload: dict = Body(default={}),
     db: Session = Depends(get_db_session),
     user=Depends(get_current_user)
 ):
@@ -532,7 +573,7 @@ async def start_race(
     Start a race:
     1. Set status to 'started'
     2. Ensure no other race is started
-    3. Assign a unified start_time to all participants (from frontend or use backend time)
+    3. Assign per-age start_time values from races table
     """
     from models import Race
 
@@ -541,49 +582,56 @@ async def start_race(
     if existing_race and str(existing_race.id) != race_id:
         raise ConflictError(f"Another race '{existing_race.name}' is already started. Only one race can be started at a time.")
 
-    # Ensure race exists and determine its participant table
     race = race_service.get_race(db=db, race_id=race_id)
     table_name_value = getattr(race, "table_name", None)
     table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
 
-    # Use start_time from frontend if provided, otherwise use backend time
-    start_time_str = payload.get('start_time')
-    if start_time_str:
-        try:
-            # Parse ISO timestamp from frontend
-            current_timestamp = parser.isoparse(start_time_str)
-        except Exception as e:
-            logger.warning(f"Failed to parse start_time from frontend: {e}, using backend time")
-            current_timestamp = get_current_timestamp_utc()
-    else:
-        current_timestamp = get_current_timestamp_utc()
-    
-    timestamp_iso = current_timestamp.isoformat()
+    up30_time = cast(Optional[datetime], race.up30start_time)
+    upto40_time = cast(Optional[datetime], race.upto40start_time)
+    start_40_45_time = cast(Optional[datetime], race.start_time_40_45)
 
-    # Promote race to STARTED (also assigns a unified start_time internally)
+    if not up30_time or not upto40_time or not start_40_45_time:
+        raise ValidationError("Race start times are not configured for all age groups")
+
+    # Promote race to STARTED
     race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.STARTED)
 
-    # Override start_time if a frontend timestamp was provided, and propagate to participants
-    grace_count = 0
+    assigned_count = 0
     try:
-        db.execute(
-            text('UPDATE races SET start_time = :ts WHERE id = :race_id'),
-            {"ts": current_timestamp, "race_id": race_id}
-        )
         update_result = cast(CursorResult, db.execute(
-            text(f'UPDATE "{table_name}" SET start_time = :ts'),
-            {"ts": timestamp_iso}
+            text(
+                f"""
+                UPDATE "{table_name}"
+                SET start_time = CASE
+                    WHEN age < 30 THEN :up30
+                    WHEN age >= 30 AND age < 40 THEN :upto40
+                    WHEN age >= 40 AND age <= 45 THEN :start_40_45
+                    ELSE NULL
+                END
+                """
+            ),
+            {
+                "up30": up30_time,
+                "upto40": upto40_time,
+                "start_40_45": start_40_45_time,
+            }
         ))
-        grace_count = update_result.rowcount if update_result.rowcount is not None else 0
+        assigned_count = update_result.rowcount if update_result.rowcount is not None else 0
         db.commit()
     except Exception:
         db.rollback()
 
+    start_time_assigned = min(
+        cast(datetime, up30_time),
+        cast(datetime, upto40_time),
+        cast(datetime, start_40_45_time),
+    ).isoformat()
+
     return create_success_response({
-        "message": f"Race activated successfully, {grace_count} participants assigned start time",
-        "race": RaceResponse.from_orm(race).dict(),
-        "rfids_started": grace_count,
-        "start_time_assigned": timestamp_iso
+        "message": f"Race activated successfully, {assigned_count} participants assigned start time",
+        "race": RaceResponse.from_orm(race).dict(by_alias=True),
+        "rfids_started": assigned_count,
+        "start_time_assigned": start_time_assigned
     })
 
 
@@ -608,9 +656,9 @@ async def end_race(
                 current_timestamp = parser.isoparse(end_time_str)
             except Exception as e:
                 logger.warning(f"Failed to parse end_time from frontend: {e}, using backend time")
-                current_timestamp = get_current_timestamp_utc()
+                current_timestamp = get_current_timestamp_IST()
         else:
-            current_timestamp = get_current_timestamp_utc()
+            current_timestamp = get_current_timestamp_IST()
         
         timestamp_iso = current_timestamp.isoformat()
         
@@ -623,7 +671,7 @@ async def end_race(
         )
         
         race_response = RaceResponse.model_validate(race, from_attributes=True)
-        return create_success_response(race_response.model_dump())
+        return create_success_response(race_response.model_dump(by_alias=True))
     except ValidationError as ve:
         raise ve
     except NotFoundError as ne:
@@ -662,7 +710,7 @@ async def update_race_status_endpoint(
     try:
         race = race_service.update_race_status(db=db, race_id=race_id, new_status=new_status, system=system_flag)
         race_response = RaceResponse.model_validate(race, from_attributes=True)
-        return create_success_response(race_response.model_dump())
+        return create_success_response(race_response.model_dump(by_alias=True))
     except ValidationError as ve:
         raise ve
     except NotFoundError as ne:
@@ -670,6 +718,123 @@ async def update_race_status_endpoint(
     except Exception as exc:
         logger.exception(f"Failed to update race status {race_id}: {exc}")
         raise exc
+
+
+# ============================================================================
+# BULK UPLOAD HELPERS
+# ============================================================================
+
+def _normalize_bulk_header(value: Any) -> str:
+    raw = str(value).strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", " ", raw).strip()
+    aliases = {
+        "s no": "s.no",
+        "sno": "s.no",
+        "sr no": "s.no",
+        "serial no": "s.no",
+        "serial number": "s.no",
+        "sl no": "s.no",
+        "army no": "army number",
+        "army number": "army number",
+        "rank": "rank",
+        "name": "name",
+        "age": "age",
+        "remark": "remarks",
+        "remarks": "remarks",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    return normalized
+
+
+def _load_docx_table(file_bytes: bytes) -> pd.DataFrame:
+    doc = Document(BytesIO(file_bytes))
+    if not doc.tables:
+        raise ValidationError("DOCX file does not contain a table")
+    table = doc.tables[0]
+    rows = []
+    for row in table.rows:
+        rows.append([cell.text.strip() for cell in row.cells])
+    if not rows:
+        raise ValidationError("DOCX table is empty")
+    header = rows[0]
+    data = rows[1:]
+    return pd.DataFrame(data, columns=header)
+
+
+def _load_bulk_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    name = filename.lower() if filename else ""
+    if name.endswith(".csv"):
+        df = pd.read_csv(BytesIO(file_bytes))
+    elif name.endswith(".xlsx"):
+        df = pd.read_excel(BytesIO(file_bytes))
+    elif name.endswith(".docx"):
+        df = _load_docx_table(file_bytes)
+    else:
+        raise ValidationError("Unsupported file type. Use .docx, .xlsx, or .csv")
+
+    df.columns = [_normalize_bulk_header(c) for c in df.columns]
+    if set(df.columns) != set(BULK_HEADERS):
+        raise ValidationError(
+            "Invalid file headers. Expected: s.no, army number, rank, name, age, remarks"
+        )
+
+    df = df[BULK_HEADERS].copy()
+    df = df.dropna(how="all")
+
+    if df.empty:
+        raise ValidationError("No candidate rows found")
+
+    df["name"] = df["name"].where(df["name"].notna(), "")
+    df["name"] = df["name"].astype(str).str.strip()
+    df["s.no"] = pd.to_numeric(df["s.no"], errors="coerce")
+    df["age"] = pd.to_numeric(df["age"], errors="coerce")
+
+    df = df[(df["name"] != "") & (df["s.no"].notna()) & (df["age"].notna())]
+
+    if df.empty:
+        raise ValidationError("No valid candidate rows after validation")
+
+    df["s.no"] = df["s.no"].astype(int)
+    df["age"] = df["age"].astype(int)
+
+    invalid_age = df[(df["age"] < 0) | (df["age"] > 45)]
+    if not invalid_age.empty:
+        raise ValidationError("Age must be between 0 and 45 for bulk registration")
+
+    df["remarks"] = None
+    # Default gender to 'M' if not provided elsewhere
+    df["gender"] = "M"
+    return df
+
+
+def _assign_bulk_rfids(df: pd.DataFrame, start_seq: int) -> pd.DataFrame:
+    def _age_group_order(age: int) -> int:
+        if age <= 30:
+            return 0
+        if age <= 40:
+            return 1
+        if age <= 45:
+            return 2
+        return 3
+
+    df = df.copy()
+    df["_age_group_order"] = df["age"].apply(_age_group_order)
+    if (df["_age_group_order"] == 3).any():
+        raise ValidationError("Age out of range for RFID assignment")
+
+    df = df.sort_values(["_age_group_order", "s.no"], ascending=[True, True]).reset_index(drop=True)
+    df = df.drop(columns=["_age_group_order"])
+
+    if start_seq < 0 or start_seq > 999:
+        raise ValidationError("RFID sequence start must be between 0 and 999")
+    if (start_seq + len(df) - 1) > 999:
+        raise ValidationError("RFID sequence exceeds 999 for this bulk upload")
+
+    seq = pd.Series(range(start_seq, start_seq + len(df)), index=df.index)
+    df["rfid_seq"] = seq
+    df["rfid_tag"] = df["rfid_seq"].apply(lambda n: f"{RFID_PREFIX}{int(n):03d}")
+    return df
 
 
 # ============================================================================
@@ -730,6 +895,116 @@ async def lookup_participant(
     return create_success_response(participant_data)
 
 
+@app.post(f"{API_PREFIX}/races/{{race_id}}/bulk-upload")
+async def bulk_upload_candidates(
+    race_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db_session),
+    _user=Depends(get_current_user)
+):
+    """
+    Bulk upload candidates for a race and auto-assign RFIDs using pandas.
+    """
+    race = race_service.get_race(db=db, race_id=race_id)
+    if getattr(race, "status", None) != RaceStatus.CREATED.value:
+        raise ConflictError("Bulk upload is only allowed for races in 'created' status")
+
+    if not file or not file.filename:
+        raise ValidationError("Missing upload file")
+
+    table_name = _safe_table_name(race)
+    file_bytes = await file.read()
+
+    df = _load_bulk_dataframe(file_bytes, file.filename)
+
+    # Determine RFID sequence start based on existing tags
+    max_seq = 0
+    try:
+        rows = db.execute(
+            text(f'SELECT rfid_tag FROM "{table_name}" WHERE race_id = :race_id'),
+            {"race_id": race_id}
+        ).fetchall()
+        for row in rows:
+            tag = getattr(row, "rfid_tag", None) or row[0]
+            if not tag:
+                continue
+            tag_str = str(tag)
+            if not validate_rfid_tag(tag_str):
+                continue
+            if not tag_str.startswith(RFID_PREFIX) or len(tag_str) != len(RFID_PREFIX) + 3:
+                continue
+            suffix = tag_str[-3:]
+            if not suffix.isdigit():
+                continue
+            try:
+                max_seq = max(max_seq, int(suffix))
+            except Exception:
+                continue
+    except Exception:
+        max_seq = 0
+
+    df = _assign_bulk_rfids(df, max_seq + 1)
+
+    key_record = fernet_manager.get_or_create_active_key(db)
+    encryption_key_id = str(key_record.id)
+
+    payloads = []
+    for row in df.to_dict(orient="records"):
+        name = str(row.get("name", "")).strip()
+        age_raw = row.get("age")
+        if age_raw is None:
+            continue
+        age_val = int(cast(int, age_raw))
+        category = rfid_service._calculate_category(age_val)
+        encrypted_name = fernet_manager.encrypt(name)
+
+        s_no_raw = row.get("s.no")
+        if s_no_raw is None:
+            continue
+        s_no_val = int(cast(int, s_no_raw))
+
+        payloads.append({
+            "id": str(uuid.uuid4()),
+            "race_id": race_id,
+            "rfid_tag": row.get("rfid_tag"),
+            "s_no": s_no_val,
+            "army_number": row.get("army number"),
+            "rank": row.get("rank"),
+            "remarks": None,
+            "encrypted_name": encrypted_name,
+            "age": age_val,
+            "gender": "M",
+            "category": category,
+            "encryption_key_id": encryption_key_id,
+        })
+
+    if not payloads:
+        raise ValidationError("No valid candidates to insert")
+
+    insert_sql = text(
+        f"""
+        INSERT INTO "{table_name}"
+        (id, race_id, rfid_tag, s_no, army_number, rank, remarks, encrypted_name, age, gender, category, encryption_key_id, registered_at)
+        VALUES (:id, :race_id, :rfid_tag, :s_no, :army_number, :rank, :remarks, :encrypted_name, :age, :gender, :category, :encryption_key_id, NOW())
+        """
+    )
+
+    try:
+        db.execute(insert_sql, payloads)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception(f"Bulk upload failed for race {race_id}: {exc}")
+        raise
+
+    return create_success_response({
+        "message": "Bulk upload completed",
+        "inserted": len(payloads),
+        "rfid_start": payloads[0]["rfid_tag"],
+        "rfid_end": payloads[-1]["rfid_tag"],
+    })
+
+
 
 # ============================================================================
 # PARTICIPANT LISTING ENDPOINTS
@@ -747,14 +1022,14 @@ def _fetch_participants_for_race(db: Session, race, fernet_mgr, rsa_mgr, include
     # Build query with optional timing columns
     if include_timing:
         query = f'''
-            SELECT id, race_id, rfid_tag, encrypted_name, age, gender, category, registered_at, encryption_key_id,
+            SELECT id, race_id, rfid_tag, s_no, army_number, rank, remarks, encrypted_name, age, gender, category, registered_at, encryption_key_id,
                    start_time, mid_time, end_time, status 
             FROM "{table_name}"
             ORDER BY rfid_tag ASC
         '''
     else:
         query = f'''
-            SELECT id, race_id, rfid_tag, encrypted_name, age, gender, category, registered_at, encryption_key_id 
+            SELECT id, race_id, rfid_tag, s_no, army_number, rank, remarks, encrypted_name, age, gender, category, registered_at, encryption_key_id 
             FROM "{table_name}"
             ORDER BY rfid_tag ASC
         '''
@@ -776,6 +1051,10 @@ def _fetch_participants_for_race(db: Session, race, fernet_mgr, rsa_mgr, include
             "id": str(row.id),
             "race_id": str(row.race_id),
             "rfid_tag": str(row.rfid_tag),
+            "s_no": getattr(row, "s_no", None),
+            "army_number": getattr(row, "army_number", None),
+            "rank": getattr(row, "rank", None),
+            "remarks": getattr(row, "remarks", None),
             "encrypted_name": str(row.encrypted_name),
             "encryption_key": key,
             "encryption_key_id": str(row.encryption_key_id) if getattr(row, "encryption_key_id", None) else None,
@@ -1174,7 +1453,7 @@ async def rfid_bulk_upload(
                     event_time = event_time.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
             except Exception as ts_err:
                 logger.warning(f"[RFID_BULK] Failed to parse timestamp {entry.timestamp}: {ts_err}")
-                event_time = get_current_timestamp_utc()
+                event_time = get_current_timestamp_IST()
 
             if entry.reader_id == 2:
                 result = cast(CursorResult, db.execute(
@@ -1258,9 +1537,9 @@ async def _handle_rfid_start(rfid_tag: str, db: Session, hit_timestamp: Optional
                 # logger.info(f"[RFID_START] Using proxy timestamp: {hit_timestamp}")
             except Exception as e:
                 logger.warning(f"[RFID_START] Failed to parse hit_timestamp '{hit_timestamp}': {e}; using current time")
-                current_time = get_current_timestamp_utc()
+                current_time = get_current_timestamp_IST()
         else:
-            current_time = get_current_timestamp_utc()
+            current_time = get_current_timestamp_IST()
             # logger.debug(f"[RFID_START] No proxy timestamp provided; using backend time: {current_time}")
         
         # Find the started race
@@ -1403,9 +1682,9 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
                 # logger.info(f"[RFID_END] Using proxy timestamp: {hit_timestamp}")
             except Exception as e:
                 logger.warning(f"[RFID_END] Failed to parse hit_timestamp '{hit_timestamp}': {e}; using current time")
-                current_time = get_current_timestamp_utc()
+                current_time = get_current_timestamp_IST()
         else:
-            current_time = get_current_timestamp_utc()
+            current_time = get_current_timestamp_IST()
             logger.debug(f"[RFID_END] No proxy timestamp provided; using backend time: {current_time}")
         
         # Find the started race
@@ -1599,9 +1878,9 @@ async def _handle_rfid_mid(rfid_tag: str, db: Session, hit_timestamp: Optional[s
                     current_time = current_time.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
             except Exception as e:
                 logger.warning(f"[RFID_MID] Failed to parse hit_timestamp '{hit_timestamp}': {e}; using current time")
-                current_time = get_current_timestamp_utc()
+                current_time = get_current_timestamp_IST()
         else:
-            current_time = get_current_timestamp_utc()
+            current_time = get_current_timestamp_IST()
 
         query = text("""
             SELECT id, name, table_name, scheduled_date, status
@@ -1692,9 +1971,6 @@ async def record_rfid_start_from_listener(
     rfid_tag = rfid_tag_raw.upper()
     
     try:
-        # Get today's date
-        today = datetime.utcnow().date()
-        
         # Find started race only
         query = text("""
             SELECT id, name, table_name, scheduled_date, status 
@@ -1840,7 +2116,7 @@ async def record_rfid_end_from_listener(
             )
             return create_success_response(response.model_dump())
 
-        current_time = get_current_timestamp_utc()
+        current_time = get_current_timestamp_IST()
         mid_time = getattr(row, "mid_time", None)
         participant_age = getattr(row, "age", None)
         race_start_time = getattr(race_row, "start_time", None)
@@ -1923,6 +2199,20 @@ async def root():
     return create_success_response({"message": "RFID Marathon Management System API"})
 
 
+def _set_working_directory() -> None:
+    if getattr(sys, "frozen", False):
+        base_dir = Path(sys.executable).resolve().parent
+    else:
+        base_dir = Path(__file__).resolve().parent
+    os.chdir(base_dir)
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    freeze_support()
+    _set_working_directory()
+
+    host = os.getenv("APP_HOST", "0.0.0.0")
+    port = int(os.getenv("APP_PORT", "8000"))
+
+    uvicorn.run(app, host=host, port=port, log_level="info")
