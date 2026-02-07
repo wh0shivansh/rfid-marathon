@@ -15,17 +15,12 @@ if (-not (Test-Path ".venv")) {
 . .\.venv\Scripts\Activate.ps1
 
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
 python -m pip install pyinstaller
 
 # Build single-file executable
-pyinstaller --noconfirm control-hub.spec
+pyinstaller --noconfirm --onefile --noconsole --name control-hub control_hub.py
 
 Write-Host "Moving dist folder to root level"
-# check if the file exist then delete the folder
-if (Test-Path "..\..\RFID-Marathon-Automation\control-hub") {
-    Remove-Item "..\..\RFID-Marathon-Automation\control-hub" -Recurse -Force
-}
-Move-Item -Path "dist\control-hub" -Destination "..\..\RFID-Marathon-Automation" -Force
+Move-Item -Path "dist\control-hub.exe" -Destination "..\RFID-Marathon-Automation\control-hub.exe" -Force
 Remove-Item "dist" -Recurse -Force
 Remove-Item "build" -Recurse -Force

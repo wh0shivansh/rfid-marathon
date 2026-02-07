@@ -311,6 +311,63 @@ class MigrationManager:
             results["success"] = False
             results["error"] = str(e)
             return results
+
+    def ensure_participant_army_number_unique(self) -> Dict[str, Any]:
+        """
+        Ensure all per-race participant tables enforce unique army_number per race.
+        Adds UNIQUE(race_id, army_number) constraint if missing.
+        """
+        results: Dict[str, Any] = {"updated_tables": [], "skipped_tables": [], "errors": []}
+        try:
+            if self.engine is None:
+                return {"success": False, "error": "No engine"}
+            inspector = inspect(self.engine)
+            with self.engine.connect() as conn:
+                race_rows = conn.execute(text("SELECT id, table_name FROM races")).fetchall()
+                for row in race_rows:
+                    race_id = row.id if hasattr(row, "id") else row[0]
+                    table_name = row.table_name if hasattr(row, "table_name") else row[1]
+                    if not table_name:
+                        results["skipped_tables"].append({"race_id": str(race_id), "reason": "no table_name"})
+                        continue
+                    cols = [col['name'] for col in inspector.get_columns(table_name)] if inspector else []
+                    if "army_number" not in cols:
+                        results["skipped_tables"].append({"table": table_name, "reason": "no army_number column"})
+                        continue
+
+                    constraint_name = f"uq_{table_name}_race_army_number"
+                    existing_constraints = [
+                        c.get("name") for c in (inspector.get_unique_constraints(table_name) if inspector else [])
+                    ]
+                    if constraint_name in existing_constraints:
+                        results["skipped_tables"].append(table_name)
+                        continue
+
+                    try:
+                        conn.execute(
+                            text(
+                                f"UPDATE \"{table_name}\" "
+                                "SET army_number = NULL "
+                                "WHERE army_number IS NOT NULL AND BTRIM(army_number) = ''"
+                            )
+                        )
+                        conn.execute(
+                            text(
+                                f"ALTER TABLE \"{table_name}\" "
+                                f"ADD CONSTRAINT {constraint_name} UNIQUE (race_id, army_number)"
+                            )
+                        )
+                        results["updated_tables"].append(table_name)
+                    except Exception as e:
+                        results["errors"].append({"table": table_name, "error": str(e)})
+                conn.commit()
+            results["success"] = True
+            return results
+        except Exception as e:
+            logger.error(f"✗ Failed enforcing army_number uniqueness: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            return results
     
     def table_exists(self, table_name: str) -> bool:
         """
@@ -697,47 +754,51 @@ def run_migrations() -> Dict[str, Any]:
     
     try:
         # Step 1: Create tables
-        logger.info("\n[1/9] Creating database tables...")
+        logger.info("\n[1/13] Creating database tables...")
         results["tables"] = migration_manager.create_tables()
         
         # Step 2: Add missing columns
-        logger.info("\n[2/9] Adding missing columns...")
+        logger.info("\n[2/13] Adding missing columns...")
         results["columns"] = migration_manager.add_missing_columns()
         
         # Step 3: Update constraints
-        logger.info("\n[3/9] Updating database constraints...")
+        logger.info("\n[3/13] Updating database constraints...")
         results["constraints"] = migration_manager.update_race_distance_constraint()
         # Step 4: Update race status constraint to include all valid statuses
-        logger.info("\n[4/9] Updating race status constraint...")
+        logger.info("\n[4/13] Updating race status constraint...")
         results["status_constraint"] = migration_manager.update_race_status_constraint()
         
         # Step 5: Create custom indexes
-        logger.info("\n[5/9] Creating custom indexes...")
+        logger.info("\n[5/13] Creating custom indexes...")
         migration_manager.create_indexes()
         results["indexes"] = {"success": True}
         
         # Step 6: Add start/end columns to per-race participant tables
-        logger.info("\n[6/9] Ensuring per-race participant tables have start/end times...")
+        logger.info("\n[6/13] Ensuring per-race participant tables have start/end times...")
         results["participant_time_columns"] = migration_manager.ensure_participant_time_columns()
         
         # Step 7: Add status column to per-race participant tables
-        logger.info("\n[7/9] Ensuring per-race participant tables have status column...")
+        logger.info("\n[7/13] Ensuring per-race participant tables have status column...")
         results["participant_status_column"] = migration_manager.ensure_participant_status_column()
         
         # Step 8: Enforce gender NOT NULL in participant tables
-        logger.info("\n[8/9] Enforcing gender NOT NULL in participant tables...")
+        logger.info("\n[8/13] Enforcing gender NOT NULL in participant tables...")
         results["participant_gender_not_null"] = migration_manager.ensure_participant_gender_not_null()
         
         # Step 9: Add bulk upload columns to per-race participant tables
-        logger.info("\n[9/12] Ensuring per-race participant tables have bulk upload columns...")
+        logger.info("\n[9/13] Ensuring per-race participant tables have bulk upload columns...")
         results["participant_bulk_columns"] = migration_manager.ensure_participant_bulk_columns()
 
-        # Step 10: Add race timing columns (age-based start times, end_time)
-        logger.info("\n[10/12] Adding race timing columns (age-based start times, end_time)...")
+        # Step 10: Enforce unique army_number per race
+        logger.info("\n[10/13] Enforcing unique army_number per race...")
+        results["participant_army_number_unique"] = migration_manager.ensure_participant_army_number_unique()
+
+        # Step 11: Add race timing columns (age-based start times, end_time)
+        logger.info("\n[11/13] Adding race timing columns (age-based start times, end_time)...")
         results["race_timing_columns"] = migration_manager.ensure_race_timing_columns()
         
-        # Step 11: Verify schema
-        logger.info("\n[11/12] Verifying database schema...")
+        # Step 12: Verify schema
+        logger.info("\n[12/13] Verifying database schema...")
         results["verification"] = migration_manager.verify_schema()
         
         if not results["verification"]["success"]:
@@ -746,8 +807,8 @@ def run_migrations() -> Dict[str, Any]:
                 details=results["verification"]
             )
         
-        # Step 12: Seed default data
-        logger.info("\n[12/12] Seeding default data...")
+        # Step 13: Seed default data
+        logger.info("\n[13/13] Seeding default data...")
         migration_manager.seed_default_data()
         results["seeding"] = {"success": True}
         

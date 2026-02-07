@@ -1,24 +1,8 @@
--- Initialization SQL for local Postgres container
--- Creates user `rfid`, database `rfid_db`, and grants privileges.
+-- Initialization SQL for local PostgreSQL instance
+-- This file is intended to be templated by the setup script.
+-- Placeholders: __APP_USER__, __APP_PASSWORD__, __APP_DB__
 
-DO
-$$
-BEGIN
-   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'rfid') THEN
-       CREATE ROLE rfid WITH LOGIN PASSWORD 'InnoRfidPass';
-   END IF;
-END
-$$;
-
--- Create database if it doesn't exist
-DO
-$$
-BEGIN
-   IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'rfid_db') THEN
-       PERFORM pg_catalog.set_config('search_path', '', false);
-       CREATE DATABASE rfid_db OWNER rfid;
-   END IF;
-END
-$$;
-
--- Add any additional schema/init statements below if needed.
+CREATE ROLE "__APP_USER__" WITH LOGIN PASSWORD '__APP_PASSWORD__';
+ALTER ROLE "__APP_USER__" WITH LOGIN PASSWORD '__APP_PASSWORD__';
+CREATE DATABASE "__APP_DB__" OWNER "__APP_USER__";
+GRANT ALL PRIVILEGES ON DATABASE "__APP_DB__" TO "__APP_USER__";

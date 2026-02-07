@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional, List, Any
 from enum import Enum
 
-from pydantic import BaseModel, Field, validator, EmailStr, field_serializer, conlist
+from pydantic import BaseModel, Field, validator
 from sqlalchemy import (
     Column, String, Integer, DateTime, Boolean, Float, 
     Text, ForeignKey, Index, UniqueConstraint, CheckConstraint

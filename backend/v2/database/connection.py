@@ -18,7 +18,6 @@ import os
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
-from sqlalchemy.exc import OperationalError, DatabaseError
 
 from constants import (
     DB_POOL_SIZE,

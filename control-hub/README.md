@@ -1,23 +1,21 @@
-Control Hub (Docker Orchestrator)
+Control Hub (Exe Orchestrator)
 
-This utility controls the backend/proxy/UDP services using Docker Compose.
+This utility starts and stops the packaged exe services directly (no Docker).
 
-Commands:
-- up: Start services (docker compose up -d)
-- down: Stop and remove services (docker compose down)
-- start: Start stopped services
-- stop: Stop running services
-- restart: Restart services
-- status: Show service status
-- logs: Tail logs
-
-Example:
-- control_hub.exe up
-- control_hub.exe stop --services rfid-proxy,udp-listener
+Placement:
+- Put control_hub.exe inside RFID-Marathon-Automation.
 
 Build to a single exe (Windows):
 - pip install pyinstaller
 - pyinstaller --onefile control_hub.py
 
 Config:
-- control-hub/config.json
+- RFID-Marathon-Automation/config.json
+
+Example config:
+{
+	"services": [
+		{"name": "rfid-backend", "path": "rfid-backend/rfid-backend.exe"},
+		{"name": "udp-listener", "path": "udp-listener/udp-listener.exe"}
+	]
+}

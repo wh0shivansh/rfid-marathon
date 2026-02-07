@@ -32,7 +32,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
-from sqlalchemy.engine import Result, CursorResult
+from sqlalchemy.engine import CursorResult
 
 from constants import API_PREFIX, RaceStatus, RACE_STATUS_TRANSITIONS, ErrorMessages, FeatureFlags, BULK_HEADERS, RFID_PREFIX
 from database.connection import (
@@ -47,8 +47,7 @@ from services.race_service import get_race_service
 from services.rfid_service import get_rfid_service
 from services.rsa_manager import get_rsa_manager
 from services.fernet_manager import get_fernet_manager
-from services.race_state_manager import get_race_state_manager
-from middleware.auth_middleware import get_auth_middleware, get_current_user
+from middleware.auth_middleware import get_current_user
 from models import (
     LoginRequest,
     RaceCreateRequest,
@@ -109,10 +108,8 @@ password_manager = get_password_manager()
 jwt_manager = get_jwt_manager()
 race_service = get_race_service()
 rfid_service = get_rfid_service()
-race_state_manager = get_race_state_manager()
 rsa_manager = get_rsa_manager()
 fernet_manager = get_fernet_manager()
-auth_middleware = get_auth_middleware()
 
 
 # ============================================================================
@@ -917,6 +914,17 @@ async def bulk_upload_candidates(
 
     df = _load_bulk_dataframe(file_bytes, file.filename)
 
+    df["army number"] = df["army number"].apply(
+        lambda value: str(value).strip() if pd.notna(value) else None
+    )
+    df["army number"] = df["army number"].replace("", None)
+
+    skipped_duplicate_army_numbers = 0
+    duplicate_mask = df["army number"].notna() & df["army number"].duplicated()
+    if duplicate_mask.any():
+        skipped_duplicate_army_numbers = int(duplicate_mask.sum())
+        df = df[~duplicate_mask]
+
     # Determine RFID sequence start based on existing tags
     max_seq = 0
     try:
@@ -942,6 +950,31 @@ async def bulk_upload_candidates(
                 continue
     except Exception:
         max_seq = 0
+
+    existing_army_numbers = set()
+    try:
+        rows = db.execute(
+            text(
+                f'SELECT army_number FROM "{table_name}" '
+                'WHERE race_id = :race_id AND army_number IS NOT NULL'
+            ),
+            {"race_id": race_id}
+        ).fetchall()
+        for row in rows:
+            value = getattr(row, "army_number", None) or row[0]
+            if value:
+                existing_army_numbers.add(str(value).strip())
+    except Exception:
+        existing_army_numbers = set()
+
+    skipped_existing_army_numbers = 0
+    if existing_army_numbers:
+        before_count = len(df)
+        df = df[~df["army number"].isin(existing_army_numbers)]
+        skipped_existing_army_numbers = before_count - len(df)
+
+    if df.empty:
+        raise ValidationError("No valid candidate rows after removing existing army numbers")
 
     df = _assign_bulk_rfids(df, max_seq + 1)
 
@@ -1000,6 +1033,8 @@ async def bulk_upload_candidates(
     return create_success_response({
         "message": "Bulk upload completed",
         "inserted": len(payloads),
+        "skipped_duplicate_army_numbers": skipped_duplicate_army_numbers,
+        "skipped_existing_army_numbers": skipped_existing_army_numbers,
         "rfid_start": payloads[0]["rfid_tag"],
         "rfid_end": payloads[-1]["rfid_tag"],
     })
