@@ -19,7 +19,7 @@ python -m pip install -r requirements.txt
 python -m pip install pyinstaller
 
 # Build single-file executable
-pyinstaller --noconfirm --name rfid-listener run_rfid_listener.py
+pyinstaller --noconfirm --name rfid-listener rfid_listener.py
 
 Write-Host "Build complete. Output: dist\rfid_listener.exe"
 Write-Host "Place .env next to the exe before running."

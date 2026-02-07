@@ -8,7 +8,10 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=collect_submodules('requests','python-dotenv','uvicorn'),
+    hiddenimports=(
+        collect_submodules('requests')
+        + collect_submodules('dotenv')
+    ),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

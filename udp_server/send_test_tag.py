@@ -10,12 +10,10 @@ import os
 import socket
 import json
 import time
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 load_dotenv()
 
-HOST = os.getenv("TEST_HOST", "192.168.1.11")
-PORT = int(os.getenv("TEST_PORT", "6000"))
 HOST = "127.0.0.1"
 PORT = 6000
 
@@ -32,5 +30,5 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 msg = json.dumps(payload).encode('utf-8')
 # print(f"Sending test tag to {HOST}:{PORT}: {payload}")
 s.sendto(msg, (HOST, PORT))
-print("Sent")
+print(f"Sent {payload} to {HOST}:{PORT}")
 s.close()
