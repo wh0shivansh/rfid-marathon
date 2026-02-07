@@ -8,7 +8,8 @@ This module handles RFID tag mapping and participant lookups.
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional, cast
 
 from sqlalchemy.orm import Session
@@ -158,7 +159,7 @@ class RFIDService:
             if result is not None:
                 registered_at = getattr(result, "registered_at", None)
             if registered_at is None:
-                registered_at = datetime.now(timezone.utc)
+                registered_at = datetime.now(ZoneInfo('Asia/Kolkata'))
             
             db.commit()
             

@@ -21,10 +21,9 @@ import re
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 
-app = FastAPI(title="RFID Listener", version="1.0.0")
+app = FastAPI(title="RFID Listener", version="2.0.0-alpha")
 
 app.add_middleware(
     CORSMiddleware,

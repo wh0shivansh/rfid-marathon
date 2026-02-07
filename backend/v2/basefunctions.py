@@ -11,7 +11,8 @@ import re
 import uuid
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 import logging
@@ -33,14 +34,14 @@ logger = logging.getLogger(__name__)
 # TIMESTAMP UTILITIES
 # ============================================================================
 
-def get_current_timestamp_utc() -> datetime:
+def get_current_timestamp_IST() -> datetime:
     """
-    Get current UTC timestamp with microsecond precision.
+    Get current IST timestamp with microsecond precision.
     
     Returns:
-        datetime: Current UTC timestamp
+        datetime: Current IST timestamp
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(ZoneInfo('Asia/Kolkata'))
 
 
 def timestamp_to_iso8601(dt: datetime) -> str:
@@ -105,7 +106,7 @@ def is_timestamp_within_window(
     Returns:
         bool: True if within window, False otherwise
     """
-    current_time = get_current_timestamp_utc()
+    current_time = get_current_timestamp_IST()
     difference = abs(timestamp_difference_seconds(timestamp, current_time))
     return difference <= window_seconds
 
@@ -572,7 +573,7 @@ def create_success_response(
         "success": True,
         "message": message,
         "data": data,
-        "timestamp": timestamp_to_iso8601(get_current_timestamp_utc())
+        "timestamp": timestamp_to_iso8601(get_current_timestamp_IST())
     }
 
 
@@ -597,7 +598,7 @@ def create_error_response(
         "error_code": error_code,
         "message": message,
         "details": details or {},
-        "timestamp": timestamp_to_iso8601(get_current_timestamp_utc())
+        "timestamp": timestamp_to_iso8601(get_current_timestamp_IST())
     }
 
 

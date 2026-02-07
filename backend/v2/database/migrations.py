@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from models import Base, User, NonceCache
 from database.connection import get_database_manager
-from basefunctions import DatabaseError, log_security_event, get_current_timestamp_utc
+from basefunctions import DatabaseError, log_security_event, get_current_timestamp_IST
 from constants import AuditAction
 
 logger = logging.getLogger(__name__)
@@ -212,7 +212,7 @@ class MigrationManager:
 
     def ensure_race_timing_columns(self) -> Dict[str, Any]:
         """
-        Ensure races table includes start_time and end_time columns.
+        Ensure races table includes age-based start times and end_time columns.
         IDEMPOTENT and safe across all environments.
         """
         results: Dict[str, Any] = {"added_columns": [], "skipped": []}
@@ -228,12 +228,26 @@ class MigrationManager:
             cols = [col['name'] for col in inspector.get_columns('races')] if inspector else []
             
             with self.engine.connect() as conn:
-                if 'start_time' not in cols:
-                    conn.execute(text("ALTER TABLE races ADD COLUMN start_time TIMESTAMP WITH TIME ZONE NULL"))
-                    results["added_columns"].append("start_time")
-                    logger.info("✓ Added start_time column to races table")
+                if 'up30start_time' not in cols:
+                    conn.execute(text("ALTER TABLE races ADD COLUMN up30start_time TIMESTAMP WITH TIME ZONE NULL"))
+                    results["added_columns"].append("up30start_time")
+                    logger.info("✓ Added up30start_time column to races table")
                 else:
-                    results["skipped"].append("start_time")
+                    results["skipped"].append("up30start_time")
+
+                if 'upto40start_time' not in cols:
+                    conn.execute(text("ALTER TABLE races ADD COLUMN upto40start_time TIMESTAMP WITH TIME ZONE NULL"))
+                    results["added_columns"].append("upto40start_time")
+                    logger.info("✓ Added upto40start_time column to races table")
+                else:
+                    results["skipped"].append("upto40start_time")
+
+                if '40_45start_time' not in cols:
+                    conn.execute(text("ALTER TABLE races ADD COLUMN \"40_45start_time\" TIMESTAMP WITH TIME ZONE NULL"))
+                    results["added_columns"].append("40_45start_time")
+                    logger.info("✓ Added 40_45start_time column to races table")
+                else:
+                    results["skipped"].append("40_45start_time")
                 
                 if 'end_time' not in cols:
                     conn.execute(text("ALTER TABLE races ADD COLUMN end_time TIMESTAMP WITH TIME ZONE NULL"))
@@ -248,6 +262,52 @@ class MigrationManager:
             return results
         except Exception as e:
             logger.error(f"✗ Failed ensuring race timing columns: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            return results
+
+    def ensure_participant_bulk_columns(self) -> Dict[str, Any]:
+        """
+        Ensure all per-race participant tables include bulk upload columns.
+        Adds s_no, army_number, rank, remarks if missing.
+        """
+        results: Dict[str, Any] = {"updated_tables": [], "skipped_tables": [], "errors": []}
+        try:
+            if self.engine is None:
+                return {"success": False, "error": "No engine"}
+            inspector = inspect(self.engine)
+            with self.engine.connect() as conn:
+                race_rows = conn.execute(text("SELECT id, table_name FROM races")).fetchall()
+                for row in race_rows:
+                    race_id = row.id if hasattr(row, "id") else row[0]
+                    table_name = row.table_name if hasattr(row, "table_name") else row[1]
+                    if not table_name:
+                        results["skipped_tables"].append({"race_id": str(race_id), "reason": "no table_name"})
+                        continue
+                    cols = [col['name'] for col in inspector.get_columns(table_name)] if inspector else []
+                    alterations = []
+                    if 's_no' not in cols:
+                        alterations.append("ADD COLUMN s_no INTEGER NULL")
+                    if 'army_number' not in cols:
+                        alterations.append("ADD COLUMN army_number VARCHAR(64) NULL")
+                    if 'rank' not in cols:
+                        alterations.append("ADD COLUMN rank VARCHAR(64) NULL")
+                    if 'remarks' not in cols:
+                        alterations.append("ADD COLUMN remarks TEXT NULL")
+                    if alterations:
+                        alter_sql = f"ALTER TABLE \"{table_name}\" " + ", ".join(alterations) + ";"
+                        try:
+                            conn.execute(text(alter_sql))
+                            results["updated_tables"].append(table_name)
+                        except Exception as e:
+                            results["errors"].append({"table": table_name, "error": str(e)})
+                    else:
+                        results["skipped_tables"].append(table_name)
+                conn.commit()
+            results["success"] = True
+            return results
+        except Exception as e:
+            logger.error(f"✗ Failed ensuring participant bulk columns: {e}")
             results["success"] = False
             results["error"] = str(e)
             return results
@@ -599,7 +659,7 @@ class MigrationManager:
         
         try:
             with self.db_manager.session_scope() as session:
-                current_time = get_current_timestamp_utc()
+                current_time = get_current_timestamp_IST()
                 
                 deleted_count = session.query(NonceCache).filter(
                     NonceCache.expires_at < current_time
@@ -668,12 +728,16 @@ def run_migrations() -> Dict[str, Any]:
         logger.info("\n[8/9] Enforcing gender NOT NULL in participant tables...")
         results["participant_gender_not_null"] = migration_manager.ensure_participant_gender_not_null()
         
-        # Step 9: Add race timing columns (start_time, end_time)
-        logger.info("\n[9/11] Adding race timing columns (start_time, end_time)...")
+        # Step 9: Add bulk upload columns to per-race participant tables
+        logger.info("\n[9/12] Ensuring per-race participant tables have bulk upload columns...")
+        results["participant_bulk_columns"] = migration_manager.ensure_participant_bulk_columns()
+
+        # Step 10: Add race timing columns (age-based start times, end_time)
+        logger.info("\n[10/12] Adding race timing columns (age-based start times, end_time)...")
         results["race_timing_columns"] = migration_manager.ensure_race_timing_columns()
         
-        # Step 10: Verify schema
-        logger.info("\n[10/11] Verifying database schema...")
+        # Step 11: Verify schema
+        logger.info("\n[11/12] Verifying database schema...")
         results["verification"] = migration_manager.verify_schema()
         
         if not results["verification"]["success"]:
@@ -682,8 +746,8 @@ def run_migrations() -> Dict[str, Any]:
                 details=results["verification"]
             )
         
-        # Step 11: Seed default data
-        logger.info("\n[11/11] Seeding default data...")
+        # Step 12: Seed default data
+        logger.info("\n[12/12] Seeding default data...")
         migration_manager.seed_default_data()
         results["seeding"] = {"success": True}
         

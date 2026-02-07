@@ -121,11 +121,15 @@ class RaceResponse(BaseModel):
     age_40to45_excellent: float = 1878
     age_40to45_good: float = 1980
     age_40to45_satisfactory: float = 2100
-    start_time: Optional[datetime] = None
+    up30start_time: Optional[datetime] = None
+    upto40start_time: Optional[datetime] = None
+    start_time_40_45: Optional[datetime] = Field(None, alias="40_45start_time")
     end_time: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+        populate_by_name = True
+        ser_json_by_alias = True
         json_encoders = {
             datetime: lambda v: v.isoformat() if v else None
         }
@@ -293,6 +297,16 @@ class RaceStartRequest(BaseModel):
     group_number: int = Field(..., ge=1, description="Group number to start")
 
 
+class RaceStartTimesRequest(BaseModel):
+    """Request to set per-age start times for a race"""
+    up30start_time: str = Field(..., description="ISO 8601 timestamp for <30")
+    upto40start_time: str = Field(..., description="ISO 8601 timestamp for 30-40")
+    start_time_40_45: str = Field(..., alias="40_45start_time", description="ISO 8601 timestamp for 40-45")
+
+    class Config:
+        populate_by_name = True
+
+
 class RaceStartResponse(BaseModel):
     """Response when group is started"""
     success: bool
@@ -384,7 +398,9 @@ class Race(Base):
     age_40to45_excellent = Column(Float, nullable=False, default=1878)  # 31.30 min
     age_40to45_good = Column(Float, nullable=False, default=1980)  # 33 min
     age_40to45_satisfactory = Column(Float, nullable=False, default=2100)  # 35 min
-    start_time = Column(DateTime(timezone=True), nullable=True)  # When race was started (from frontend)
+    up30start_time = Column(DateTime(timezone=True), nullable=True)  # Start time for <30
+    upto40start_time = Column(DateTime(timezone=True), nullable=True)  # Start time for 30-40
+    start_time_40_45 = Column("40_45start_time", DateTime(timezone=True), nullable=True)  # Start time for 40-45
     end_time = Column(DateTime(timezone=True), nullable=True)  # When race was ended
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -413,6 +429,10 @@ class Participant(Base):
     id = Column(UUID(as_uuid=False), primary_key=True, default=generate_uuid)
     race_id = Column(UUID(as_uuid=False), ForeignKey('races.id', ondelete='CASCADE'), nullable=False, index=True)
     rfid_tag = Column(String(32), nullable=False, index=True)  # PLAINTEXT (requirement)
+    s_no = Column(Integer, nullable=True)
+    army_number = Column(String(64), nullable=False)
+    rank = Column(String(64), nullable=False)
+    remarks = Column(Text, nullable=True)
     encrypted_name = Column(Text, nullable=False)  # Fernet encrypted
     age = Column(Integer, nullable=False)
     gender = Column(String(1), nullable=False)

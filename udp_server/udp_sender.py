@@ -14,8 +14,9 @@ Environment variables:
     END_PORT              - port of end-line UDP server (default: 6000)
     BIND_HOST             - host to bind FastAPI (uvicorn can override)
     BIND_PORT             - port to bind FastAPI (uvicorn can override)
-    UDP_BULK_FLUSH_SECONDS - seconds between periodic UDP flushes (default: 5)
-    UDP_BULK_MAX_SIZE     - max unique RFIDs per UDP batch (default: 100)
+    UDP_SEND_INTERVAL_SECONDS - seconds between UDP sends (default: 2)
+    UDP_SEND_REPEATS      - number of times to resend the same cache (default: 5)
+    UDP_BULK_MAX_SIZE     - max RFIDs per UDP batch (default: 100)
 """
 
 import os
@@ -26,7 +27,8 @@ import asyncio
 import sys
 from pathlib import Path
 from multiprocessing import freeze_support
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 from fastapi import FastAPI, Request
@@ -39,7 +41,8 @@ from dotenv import load_dotenv
 END_HOST = os.getenv('END_HOST', '192.168.1.10')
 END_PORT = int(os.getenv('END_PORT', '6000'))
 BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '8192'))
-UDP_BULK_FLUSH_SECONDS = int(os.getenv('UDP_BULK_FLUSH_SECONDS', '10'))
+UDP_SEND_INTERVAL_SECONDS = int(os.getenv('UDP_SEND_INTERVAL_SECONDS', '2'))
+UDP_SEND_REPEATS = int(os.getenv('UDP_SEND_REPEATS', '5'))
 UDP_BULK_MAX_SIZE = int(os.getenv('UDP_BULK_MAX_SIZE', '100'))
 
 
@@ -47,12 +50,16 @@ app = FastAPI(title='Mid-line HTTP->UDP forwarder')
 
 
 cache_lock = asyncio.Lock()
-rfid_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+cache_send: Dict[str, Dict[str, Dict[str, Any]]] = {}
+cache_next: Dict[str, Dict[str, Dict[str, Any]]] = {}
 flush_task: Optional[asyncio.Task] = None
 
 
 def current_ts() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    try:
+        return datetime.now(ZoneInfo('Asia/Kolkata')).isoformat()
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat()
 
 
 def normalize_event_data(payload: Any) -> List[dict]:
@@ -94,7 +101,7 @@ def extract_rfid(tag: Dict[str, Any]) -> Optional[str]:
 
 
 def extract_timestamp(tag: Dict[str, Any]) -> str:
-    for key in ('timestamp', 'ts', 'time', 'ft', 'lt'):
+    for key in ('timestamp', 'ts', 'time'):
         value = tag.get(key)
         if value:
             return str(value)
@@ -123,43 +130,49 @@ def chunk_list(items: List[Dict[str, Any]], chunk_size: int) -> List[List[Dict[s
     return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
 
 
-async def add_to_cache(entries: List[Dict[str, Any]], reader_name: str) -> Tuple[bool, int]:
+async def add_to_cache(entries: List[Dict[str, Any]], reader_name: str) -> int:
     async with cache_lock:
-        bucket = rfid_cache.setdefault(reader_name, {})
+        bucket = cache_next.setdefault(reader_name, {})
         for entry in entries:
             rfid = entry.get('rfid')
             if rfid:
                 bucket[rfid] = entry
-        total_cached = sum(len(items) for items in rfid_cache.values())
-        should_flush = total_cached >= UDP_BULK_MAX_SIZE
-        return should_flush, total_cached
-
-
-async def flush_cache_once() -> int:
-    async with cache_lock:
-        if not rfid_cache:
-            return 0
-        batch_by_reader = {key: list(items.values()) for key, items in rfid_cache.items()}
-        rfid_cache.clear()
-
-    total_sent = 0
-    for reader_name, entries in batch_by_reader.items():
-        for chunk in chunk_list(entries, UDP_BULK_MAX_SIZE):
-            payload = {"event_type": "tag_read", "event_data": chunk}
-            if reader_name:
-                payload["reader_name"] = reader_name
-            packet = json.dumps(payload).encode('utf-8')
-            send_udp_message(packet)
-            total_sent += len(chunk)
-    return total_sent
+        total_cached = sum(len(items) for items in cache_next.values())
+        return total_cached
 
 
 async def flush_cache_periodically() -> None:
     while True:
-        await asyncio.sleep(UDP_BULK_FLUSH_SECONDS)
-        sent = await flush_cache_once()
-        if sent:
-            logger.info(f"Flushed {sent} unique RFID(s) via UDP")
+        async with cache_lock:
+            if not cache_send and cache_next:
+                cache_send.update(cache_next)
+                cache_next.clear()
+            batch_by_reader = {key: list(items.values()) for key, items in cache_send.items()}
+
+        if not batch_by_reader:
+            await asyncio.sleep(1)
+            continue
+
+        total_sent = 0
+        for _ in range(max(1, UDP_SEND_REPEATS)):
+            for reader_name, entries in batch_by_reader.items():
+                for chunk in chunk_list(entries, UDP_BULK_MAX_SIZE):
+                    payload = {"event_type": "tag_read", "event_data": chunk}
+                    if reader_name:
+                        payload["reader_name"] = reader_name
+                    packet = json.dumps(payload).encode('utf-8')
+                    send_udp_message(packet)
+                    total_sent += len(chunk)
+            await asyncio.sleep(max(1, UDP_SEND_INTERVAL_SECONDS))
+
+        async with cache_lock:
+            cache_send.clear()
+            if cache_next:
+                cache_send.update(cache_next)
+                cache_next.clear()
+
+        if total_sent:
+            logger.info(f"Sent {total_sent} RFID(s) via UDP across {UDP_SEND_REPEATS} repeats")
 
 
 @app.on_event('startup')
@@ -198,13 +211,10 @@ async def receive_reader(request: Request, payload: dict):
         if not entries:
             return {"success": False, "message": "No valid RFID entries", "processed": 0}
 
-        should_flush, cache_size = await add_to_cache(entries, reader_name)
-        if should_flush:
-            asyncio.create_task(flush_cache_once())
-
+        cache_size = await add_to_cache(entries, reader_name)
         return {
             "success": True,
-            "message": "Queued for UDP bulk flush",
+            "message": "Queued for UDP send cycle",
             "processed": len(entries),
             "cached_unique": cache_size,
         }

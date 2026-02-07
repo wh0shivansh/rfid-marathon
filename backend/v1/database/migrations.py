@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from models import Base, User, NonceCache
 from database.connection import get_database_manager
-from basefunctions import DatabaseError, log_security_event, get_current_timestamp_utc
+from basefunctions import DatabaseError, log_security_event, get_current_timestamp_IST
 from constants import AuditAction
 
 logger = logging.getLogger(__name__)
@@ -571,7 +571,7 @@ class MigrationManager:
         
         try:
             with self.db_manager.session_scope() as session:
-                current_time = get_current_timestamp_utc()
+                current_time = get_current_timestamp_IST()
                 
                 deleted_count = session.query(NonceCache).filter(
                     NonceCache.expires_at < current_time

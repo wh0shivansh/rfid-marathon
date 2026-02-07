@@ -377,5 +377,5 @@ Frontend ONLY communicates with Backend (port 8000) for:
 ---
 
 **Last Updated**: January 22, 2026  
-**Version**: 1.0.0-alpha  
+**Version**: 2.0.0-alpha-alpha  
 **Status**: UI Components Pending

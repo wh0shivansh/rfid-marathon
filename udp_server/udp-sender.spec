@@ -1,19 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 a = Analysis(
-    ['run_udp_sender.py'],
+    ['udp_sender.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=collect_data_files('tzdata'),
     hiddenimports=(
         collect_submodules('fastapi')
         + collect_submodules('starlette')
         + collect_submodules('pydantic')
         + collect_submodules('uvicorn')
         + collect_submodules('dotenv')
+        + collect_submodules('requests')
+        + ['tzdata']
     ),
     hookspath=[],
     hooksconfig={},

@@ -2,17 +2,6 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
   // Filter only races with status 'created'
   const createdRaces = availableRaces.filter(r => r.status === 'created');
   
-  const registrationListHTML = todayRegistrations.length > 0 
-    ? todayRegistrations.map(reg => `
-        <div style="padding: 12px; margin: 8px 0; background: #0f172a; border-radius: 4px; border-left: 3px solid #22c55e;">
-          <div style="font-weight: bold; color: #9fb3e5;">${reg.name}</div>
-          <div style="color: #cbd5e1; font-size: 0.9em; margin-top: 4px;">
-            ${reg.raceName} • RFID: ${reg.rfid} • Age: ${reg.age} • Category: ${reg.category} • Gender: ${reg.gender} • ${reg.timestamp}
-          </div>
-        </div>
-      `).join('')
-    : '<p style="color: #94a3b8; text-align: center; padding: 20px;">No registrations yet</p>';
-  
   return `
     <div class="page" style="background:#0b1220; min-height:100vh; color:#e2e8f0; padding:16px;">
       <!-- Step 1: Race Selection -->
@@ -51,7 +40,11 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
             <div id="rfid-display" style="padding: 20px; background: #0f172a; border-radius: 6px; border: 2px dashed #3b82f6; font-family: monospace; font-size: 1.2em; color: #3b82f6; min-height: 60px; display: flex; align-items: center; justify-content: center;">
               ${scannedRFID || 'No RFID detected'}
             </div>
-            <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
+            <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+              <input id="bulk-upload-input" type="file" accept=".docx,.xlsx,.csv" style="display: none;" />
+              <button id="bulk-upload-btn" style="padding: 12px 24px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; font-weight: 600; display: flex; align-items: center; gap: 8px; transition: all 0.3s ease;">
+                <span style="font-size: 1.2em;">⤴</span> Bulk Upload
+              </button>
               <button id="back-to-step-1" style="padding: 12px 24px; background: #475569; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 1em;">← Back</button>
             </div>
           </div>
@@ -112,6 +105,10 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
       }
       #close-step-1:hover, #close-step-2:hover, #close-step-3:hover {
         color: #ef4444;
+      }
+      #bulk-upload-btn:hover {
+        box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+        transform: translateY(-1px);
       }
     </style>
   `;
