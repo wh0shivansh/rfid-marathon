@@ -40,7 +40,6 @@ BIND_PORT = int(os.getenv('BIND_PORT', '6000'))
 BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '8192'))
 PROXY_TIMEOUT = float(os.getenv('PROXY_TIMEOUT', '5'))
 LISTENER_FLUSH_SECONDS = int(os.getenv('LISTENER_FLUSH_SECONDS', '10'))
-PROXY_URL = 'http://127.0.0.1:9090/reader'
 
 cache_lock = threading.Lock()
 cache_seen: Set[str] = set()

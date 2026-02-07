@@ -40,6 +40,10 @@ from dotenv import load_dotenv
 
 END_HOST = os.getenv('END_HOST', '192.168.1.10')
 END_PORT = int(os.getenv('END_PORT', '6000'))
+
+BIND_HOST = os.getenv("BIND_HOST", "0.0.0.0")
+BIND_PORT = int(os.getenv("BIND_PORT", "6001"))
+
 BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '8192'))
 UDP_SEND_INTERVAL_SECONDS = int(os.getenv('UDP_SEND_INTERVAL_SECONDS', '2'))
 UDP_SEND_REPEATS = int(os.getenv('UDP_SEND_REPEATS', '5'))
@@ -238,9 +242,6 @@ if __name__ == '__main__':
         _set_working_directory()
         load_dotenv()
 
-        host = os.getenv("BIND_HOST", "0.0.0.0")
-        port = int(os.getenv("BIND_PORT", "6001"))
-
-        uvicorn.run(app, host=host, port=port, log_level="info")
+        uvicorn.run(app, host=BIND_HOST, port=BIND_PORT, log_level="info")
 
     main()
