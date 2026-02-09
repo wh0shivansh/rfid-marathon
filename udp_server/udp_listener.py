@@ -33,23 +33,51 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [end-server] %(level
 logger = logging.getLogger('end_server')
 
 from dotenv import load_dotenv
+load_dotenv()
 
 PROXY_URL = os.getenv('PROXY_URL', 'http://127.0.0.1:9090/reader')
-BIND_HOST = os.getenv('BIND_HOST', '0.0.0.0')
-BIND_PORT = int(os.getenv('BIND_PORT', '6000'))
+END_HOST = os.getenv('BIND_HOST', '0.0.0.0')
+END_PORT = int(os.getenv('BIND_PORT', '6000'))
 BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '8192'))
 PROXY_TIMEOUT = float(os.getenv('PROXY_TIMEOUT', '5'))
 LISTENER_FLUSH_SECONDS = int(os.getenv('LISTENER_FLUSH_SECONDS', '10'))
 
+# Default reader name to use when payload doesn't include one (matches send_test_tag.py)
+DEFAULT_READER_NAME = os.getenv('READER_NAME', 'Reader 2')
+
 cache_lock = threading.Lock()
+# cache_seen keys are composed as "reader|rfid" to dedupe per-reader
 cache_seen: Set[str] = set()
-cache_entries: List[Dict[str, object]] = []
+# entries are normalized dicts: {'rfid': str, 'timestamp': str, 'reader_name': str}
+cache_entries: List[Dict[str, str]] = []
 
 
 def extract_reader_name(payload: object) -> str:
 	if isinstance(payload, dict):
 		return str(payload.get('reader_name', '') or '').lower().strip()
 	return ''
+
+
+def normalize_timestamp(value: object) -> str:
+	try:
+		if value is None:
+			raise ValueError
+		# numeric (ms or s)
+		if isinstance(value, (int, float)):
+			v = float(value)
+			# heuristic: > 1e10 -> ms, else seconds
+			if v > 1e10:
+				ts = v / 1000.0
+			else:
+				ts = v
+			return time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(ts)) + 'Z'
+		# string pass-through
+		if isinstance(value, str):
+			return value
+	except Exception:
+		pass
+	# fallback to ISO-like now in UTC
+	return time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime()) + 'Z'
 
 
 def forward_to_proxy(body: dict, reader_name: str) -> Tuple[Optional[int], str]:
@@ -77,20 +105,36 @@ def normalize_event_data(payload: object) -> List[dict]:
 	return []
 
 
-def cache_entries_once(entries: List[dict]) -> int:
+def cache_entries_once(entries: List[dict], reader_name: str) -> int:
+	effective_reader = reader_name or DEFAULT_READER_NAME
 	with cache_lock:
 		added = 0
 		for entry in entries:
 			if not isinstance(entry, dict):
 				continue
-			rfid = entry.get('rfid') or entry.get('epc')
+			# find rfid from common keys
+			rfid = entry.get('rfid') or entry.get('epc') or entry.get('ep') or entry.get('tid') or entry.get('id')
 			if not rfid:
 				continue
 			rfid_key = str(rfid)
-			if rfid_key in cache_seen:
+			seen_key = f"{effective_reader}|{rfid_key}"
+			if seen_key in cache_seen:
 				continue
-			cache_seen.add(rfid_key)
-			cache_entries.append(entry)
+			cache_seen.add(seen_key)
+
+			# normalize timestamp from known keys
+			ts_val = None
+			for k in ('timestamp', 'ts', 'time', 'ft', 'lt'):
+				if k in entry:
+					ts_val = entry.get(k)
+					break
+
+			normalized = {
+				'rfid': rfid_key,
+				'timestamp': normalize_timestamp(ts_val),
+				'reader_name': effective_reader,
+			}
+			cache_entries.append(normalized)
 			added += 1
 		return added
 
@@ -104,16 +148,24 @@ def flush_cache_loop() -> None:
 			batch = list(cache_entries)
 			cache_entries.clear()
 			cache_seen.clear()
-		reader_name = ''
-		forward_to_proxy({"event_type": "tag_read", "event_data": batch}, reader_name)
+
+		# Group by reader_name and forward per-reader
+		by_reader: Dict[str, List[Dict[str, str]]] = {}
+		for e in batch:
+			rn = str(e.get('reader_name') or DEFAULT_READER_NAME)
+			by_reader.setdefault(rn, []).append(e)
+
+		for rn, items in by_reader.items():
+			# forward entries (they already include reader_name field)
+			forward_to_proxy({"event_type": "tag_read", "event_data": items}, rn)
 
 
 def start_udp_server():
-	logger.info(f"Starting end-line UDP server on {BIND_HOST}:{BIND_PORT}, forwarding to {PROXY_URL}")
+	logger.info(f"Starting end-line UDP server on {END_HOST}:{END_PORT}, forwarding to {PROXY_URL}")
 	threading.Thread(target=flush_cache_loop, daemon=True).start()
 	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	# sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	sock.bind((BIND_HOST, BIND_PORT))
+	sock.bind((END_HOST, END_PORT))
 
 	while True:
 		try:
@@ -129,7 +181,7 @@ def start_udp_server():
 			event_data = normalize_event_data(payload)
 			if not event_data:
 				continue
-			added = cache_entries_once(event_data)
+			added = cache_entries_once(event_data, reader_name)
 			if added:
 				logger.info(f"Cached {added} new tag(s) for reader {reader_name or 'unknown'}")
 

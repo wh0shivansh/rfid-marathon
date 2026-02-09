@@ -97,7 +97,6 @@ async def capture_timestamp(request: Request, call_next):
 
 def get_timing_point_from_request(request: Request, data: Optional[Dict[str, Any]]) -> TimingPoint:
     reader_name = (request.headers.get("X-Reader-Name", "") or "").lower()
-
     if not reader_name and data and isinstance(data, dict):
         reader_name = str(data.get("reader_name", "")).lower()
 
@@ -140,7 +139,13 @@ async def add_to_cache(entry: Dict[str, Any]) -> None:
 
 async def flush_cache_once() -> None:
     async with cache_lock:
+        try:
+            cache_len = len(rfid_cache)
+        except Exception:
+            cache_len = 0
+        logger.debug(f"[BULK_FLUSH] cache_size_before_flush={cache_len}")
         if not rfid_cache:
+            logger.debug("[BULK_FLUSH] cache empty, skipping flush")
             return
         batch = list(rfid_cache)
         rfid_cache.clear()
@@ -148,8 +153,15 @@ async def flush_cache_once() -> None:
     payload = {"entries": batch}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(f"{BACKEND_URL}{BACKEND_BULK_ENDPOINT}", json=payload)
-            logger.info(f"[BULK_FLUSH] Successfully sent {len(batch)} entries to backend\n{payload}")
+            target_url = f"{BACKEND_URL}{BACKEND_BULK_ENDPOINT}"
+            logger.debug(f"[BULK_FLUSH] Posting {len(batch)} entries to {target_url}")
+            response = await client.post(target_url, json=payload)
+            # Log response details for troubleshooting
+            try:
+                resp_text = response.text
+            except Exception:
+                resp_text = "<unreadable response body>"
+            logger.info(f"[BULK_FLUSH] POST {target_url} -> {response.status_code} \nresponse_body={resp_text}\npayload_len={len(batch)}")
             if response.status_code not in (200, 201):
                 raise httpx.HTTPStatusError(
                     f"Unexpected status code: {response.status_code}",
@@ -166,7 +178,7 @@ async def flush_cache_once() -> None:
 async def flush_cache_periodically() -> None:
     while True:
         await asyncio.sleep(RFID_BULK_FLUSH_SECONDS)
-        logger.debug("[BULK_FLUSH] Periodic flush triggered")
+        # logger.debug("[BULK_FLUSH] Periodic flush triggered")
         await flush_cache_once()
 
 
@@ -282,8 +294,8 @@ async def handle_tag_events(tags: List[Dict[str, Any]], timing_point: TimingPoin
     for idx, tag in enumerate(tags):
         try:
             # logger.debug(f"[TAG_HANDLER-{tp_label}] Processing tag #{idx + 1}: {tag}")
-            # Prefer canonical 'epc', then 'ep', then other common keys. Normalize to hex uppercase.
-            rfid_raw = tag.get("epc") or tag.get("ep") or tag.get("tid") or tag.get("id") or tag.get("tag_id")
+            # Prefer canonical 'rfid'/'epc'/'ep', then other common keys. Normalize to hex uppercase.
+            rfid_raw = tag.get("rfid") or tag.get("epc") or tag.get("ep") or tag.get("tid") or tag.get("id") or tag.get("tag_id")
 
             rfid = None
             if rfid_raw:
@@ -315,8 +327,12 @@ async def handle_tag_events(tags: List[Dict[str, Any]], timing_point: TimingPoin
                 protocol=tag.get("pt", "EPC"),
             )
 
-            await add_to_cache(entry)
-            processed_count += 1
+            try:
+                logger.debug(f"[TAG_HANDLER] Queuing rfid={rfid} for cache")
+                await add_to_cache(entry)
+                processed_count += 1
+            except Exception as e:
+                logger.error(f"[TAG_HANDLER] Failed to add to cache: {e}", exc_info=True)
         except Exception as exc:
             logger.error(f"[TAG_HANDLER-{tp_label}] Error processing tag #{idx + 1}: {exc}", exc_info=True)
             errors.append({"error": str(exc), "tag": tag})

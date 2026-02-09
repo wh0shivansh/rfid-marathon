@@ -605,13 +605,21 @@ class ControlHubUI:
                     ]
                     stopped = False
                     try:
+                        # prepare flags to hide spawned consoles on Windows
+                        startupinfo = None
+                        creationflags = 0
+                        if os.name == "nt":
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            creationflags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+
                         if pg_ctl.exists():
                             for d in possible_data_dirs:
                                 if d.exists():
                                     cmd = [str(pg_ctl), "stop", "-D", str(d), "-m", "fast"]
                                     self._append_status(f"Stopping local DB via pg_ctl: {d}\n")
                                     try:
-                                        sub = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                        sub = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, creationflags=creationflags)
                                         self._append_status(sub.stdout)
                                         if sub.returncode == 0:
                                             stopped = True
@@ -638,7 +646,7 @@ class ControlHubUI:
                                     # Prefer taskkill to kill the process tree if available
                                     try:
                                         if os.name == 'nt' and getattr(db_proc, 'pid', None):
-                                            subprocess.run(["taskkill", "/PID", str(db_proc.pid), "/T", "/F"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                            subprocess.run(["taskkill", "/PID", str(db_proc.pid), "/T", "/F"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, creationflags=creationflags)
                                     except Exception:
                                         pass
                                     try:
@@ -658,7 +666,7 @@ class ControlHubUI:
                                     "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*build_database.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
                                 )
                                 self._append_status("Attempting to stop any processes running build_database.ps1 via PowerShell.\n")
-                                proc_ps = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd_cmdline], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                proc_ps = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd_cmdline], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, creationflags=creationflags)
                                 self._append_status(proc_ps.stdout)
                             except Exception:
                                 pass
@@ -670,7 +678,7 @@ class ControlHubUI:
                                     "Get-CimInstance Win32_Process | Where-Object { (" + name_filter + ") } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
                                 )
                                 self._append_status("Attempting to stop postgres-related executables via PowerShell.\n")
-                                proc_ps2 = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd_names], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                proc_ps2 = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd_names], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, creationflags=creationflags)
                                 self._append_status(proc_ps2.stdout)
                             except Exception:
                                 pass
@@ -680,7 +688,7 @@ class ControlHubUI:
                                 if os.name == 'nt':
                                     for exe in exe_list:
                                         try:
-                                            subprocess.run(["taskkill", "/F", "/IM", exe], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                            subprocess.run(["taskkill", "/F", "/IM", exe], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, creationflags=creationflags)
                                         except Exception:
                                             pass
                             except Exception:
@@ -694,18 +702,18 @@ class ControlHubUI:
                                 while time.time() < cleanup_deadline:
                                     # kill by commandline mentioning build_database.ps1
                                     try:
-                                        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd_cmdline], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd_cmdline], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, creationflags=creationflags)
                                     except Exception:
                                         pass
                                     # kill by executable name
                                     try:
-                                        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd_names], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd_names], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, creationflags=creationflags)
                                     except Exception:
                                         pass
                                     if os.name == 'nt':
                                         for exe in exe_list:
                                             try:
-                                                subprocess.run(["taskkill", "/F", "/IM", exe], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                                subprocess.run(["taskkill", "/F", "/IM", exe], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo, creationflags=creationflags)
                                             except Exception:
                                                 pass
                                     # small delay between attempts

@@ -16,7 +16,7 @@ load_dotenv()
 
 HOST = "127.0.0.1"
 PORT = 6000
-READER_NAME = os.getenv('READER_NAME', 'Reader 3')
+READER_NAME = os.getenv('READER_NAME', 'Reader 2')
 
 payload = {
     "epc": "315354010100000000000014",
@@ -32,7 +32,7 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # send bulk of tags with timestamps to mimic udp_sender batching
 batch = []
 now_ms = lambda: int(time.time() * 1000)
-for i in range(11, 21):
+for i in range(11, 51):
   batch.append({
     "epc": f"315354010100000000000{str(i).zfill(3)}",
     "ft": now_ms(),

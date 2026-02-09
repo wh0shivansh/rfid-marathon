@@ -18,7 +18,7 @@ python -m pip install --upgrade pip
 python -m pip install pyinstaller
 
 # Build single-file executable
-pyinstaller --noconfirm --onefile --noconsole --name control-hub control_hub.py
+pyinstaller --noconfirm --onefile --noconsole --name control-hub control-hub.py
 
 Write-Host "Moving dist folder to root level"
 Move-Item -Path "dist\control-hub.exe" -Destination "..\RFID-Marathon-Automation\control-hub.exe" -Force

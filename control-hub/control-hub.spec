@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['control_hub.py'],
+    ['control-hub.py'],
     pathex=[],
     binaries=[],
     datas=[],

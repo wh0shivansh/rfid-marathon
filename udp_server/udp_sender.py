@@ -29,7 +29,7 @@ from pathlib import Path
 from multiprocessing import freeze_support
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, cast
 
 from fastapi import FastAPI, Request
 
@@ -37,12 +37,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [mid-server] %(level
 logger = logging.getLogger('udp_sender')
 
 from dotenv import load_dotenv
+load_dotenv()
+
+# Default reader name when none provided by incoming payload
+DEFAULT_READER_NAME = os.getenv('READER_NAME', 'Reader 2')
 
 END_HOST = os.getenv('END_HOST', '192.168.1.10')
 END_PORT = int(os.getenv('END_PORT', '6000'))
 
-BIND_HOST = os.getenv("BIND_HOST", "0.0.0.0")
-BIND_PORT = int(os.getenv("BIND_PORT", "6001"))
+SENDER_HOST = os.getenv("SENDER_HOST", "0.0.0.0")
+SENDER_PORT = int(os.getenv("SENDER_PORT", "6001"))
 
 BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '8192'))
 UDP_SEND_INTERVAL_SECONDS = int(os.getenv('UDP_SEND_INTERVAL_SECONDS', '2'))
@@ -135,12 +139,27 @@ def chunk_list(items: List[Dict[str, Any]], chunk_size: int) -> List[List[Dict[s
 
 
 async def add_to_cache(entries: List[Dict[str, Any]], reader_name: str) -> int:
+    effective_reader = reader_name or DEFAULT_READER_NAME
     async with cache_lock:
-        bucket = cache_next.setdefault(reader_name, {})
+        bucket = cache_next.setdefault(effective_reader, {})
         for entry in entries:
             rfid = entry.get('rfid')
-            if rfid:
-                bucket[rfid] = entry
+            if not rfid:
+                continue
+            rfid_key = str(rfid)
+            # normalize minimal entry structure and include reader_name
+            entry_with_reader: Dict[str, Any] = {
+                'rfid': rfid_key,
+                'timestamp': entry.get('timestamp') or current_ts(),
+                'reader_name': effective_reader,
+            }
+            # keep other fields if present
+            for k, v in entry.items():
+                if k not in entry_with_reader:
+                    entry_with_reader[k] = v
+
+            bucket[rfid_key] = entry_with_reader
+
         total_cached = sum(len(items) for items in cache_next.values())
         return total_cached
 
@@ -242,6 +261,6 @@ if __name__ == '__main__':
         _set_working_directory()
         load_dotenv()
 
-        uvicorn.run(app, host=BIND_HOST, port=BIND_PORT, log_level="info")
+        uvicorn.run(app, host=SENDER_HOST, port=SENDER_PORT, log_level="info")
 
     main()
