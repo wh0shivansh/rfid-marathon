@@ -266,7 +266,7 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
               <option value="excellent" ${remarksFilter === 'excellent' ? 'selected' : ''}>Excellent</option>
               <option value="good" ${remarksFilter === 'good' ? 'selected' : ''}>Good</option>
               <option value="satisfied" ${remarksFilter === 'satisfied' ? 'selected' : ''}>Satisfied</option>
-              <option value="fail" ${remarksFilter === 'fail' ? 'selected' : ''}>fail</option>
+              <option value="fail" ${remarksFilter === 'fail' ? 'selected' : ''}>Fail</option>
             </select>
 
             <button id="scoreboard-clear-filters" style="padding: 8px 12px; background: #1f2937; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.9em; cursor: pointer;">Clear filters</button>
