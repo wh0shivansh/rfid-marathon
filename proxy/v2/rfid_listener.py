@@ -142,6 +142,10 @@ async def flush_cache_once() -> None:
         batch = list(rfid_cache)
         rfid_cache.clear()
 
+    if not batch:
+        logger.debug("[BULK_FLUSH] Skipping flush: no entries in cache")
+        return
+
     payload = {"entries": batch}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -234,7 +238,7 @@ async def receive_from_hub(request: Request):
 
     # logger.debug(f"[READER-{timing_point.value.upper()}] {reader_label} - Incoming request from {request.client.host if request.client else 'unknown'}")
     # logger.debug(f"[READER-{timing_point.value.upper()}] Headers: {dict(request.headers)}")
-    logger.debug(f"[READER-{timing_point.value.upper()}] Raw payload: {data}")
+    # logger.debug(f"[READER-{timing_point.value.upper()}] Raw payload: {data}")
 
     event_type = data.get("event_type") if isinstance(data, dict) else None
     event_data = data.get("event_data", []) if isinstance(data, dict) else []
@@ -321,7 +325,7 @@ async def handle_tag_events(tags: List[Dict[str, Any]], timing_point: TimingPoin
             )
 
             try:
-                logger.debug(f"[TAG_HANDLER] Queuing rfid={rfid} for cache")
+                # logger.debug(f"[TAG_HANDLER] Queuing rfid={rfid} for cache")
                 await add_to_cache(entry)
                 processed_count += 1
             except Exception as e:
