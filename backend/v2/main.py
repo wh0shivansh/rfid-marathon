@@ -1787,20 +1787,20 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         fallback_tz = current_time.tzinfo
         effective_start_time = _coerce_datetime(effective_start_time, cast(Optional[tzinfo], fallback_tz))
 
-        disqualify_reasons = []
+        fail_reasons = []
         if mid_time is None:
-            disqualify_reasons.append("mid_time missing")
+            fail_reasons.append("mid_time missing")
 
         max_allowed_seconds = _get_max_allowed_seconds(participant_age, race_row)
         if effective_start_time and max_allowed_seconds is not None:
             try:
                 duration_seconds = (current_time - effective_start_time).total_seconds()
                 if duration_seconds > float(max_allowed_seconds):
-                    disqualify_reasons.append("time limit exceeded")
+                    fail_reasons.append("time limit exceeded")
             except Exception as e:
                 logger.warning(f"[RFID_END] Failed to compute duration for {participant_id}: {e}")
 
-        status_to_set = "disqualified" if disqualify_reasons else "completed"
+        status_to_set = "fail" if fail_reasons else "completed"
 
         # Record end time with timestamp from proxy and set status accordingly
         db.execute(
@@ -1814,10 +1814,10 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         # Check if all participants now have end times, and auto-end the race if so
         await check_and_auto_end_race(race_id, table_name, db)
         
-        disqualify_note = f" (disqualified: {', '.join(disqualify_reasons)})" if disqualify_reasons else ""
+        fail_note = f" (fail: {', '.join(fail_reasons)})" if fail_reasons else ""
         response = RFIDHitResponse(
             success=True,
-            message=f"End time recorded in {race_name}, status set to {status_to_set}{disqualify_note}",
+            message=f"End time recorded in {race_name}, status set to {status_to_set}{fail_note}",
             rfid_tag=rfid_tag
         )
         return create_success_response(response.model_dump())
@@ -2158,20 +2158,20 @@ async def record_rfid_end_from_listener(
         participant_start_time = getattr(row, "start_time", None)
         effective_start_time = _coerce_datetime(participant_start_time or race_start_time, current_time.tzinfo)
 
-        disqualify_reasons = []
+        fail_reasons = []
         if mid_time is None:
-            disqualify_reasons.append("mid_time missing")
+            fail_reasons.append("mid_time missing")
 
         max_allowed_seconds = _get_max_allowed_seconds(participant_age, race_row)
         if effective_start_time and max_allowed_seconds is not None:
             try:
                 duration_seconds = (current_time - effective_start_time).total_seconds()
                 if duration_seconds > float(max_allowed_seconds):
-                    disqualify_reasons.append("time limit exceeded")
+                    fail_reasons.append("time limit exceeded")
             except Exception as e:
                 logger.warning(f"[RFID_END] Failed to compute duration for {rfid_tag}: {e}")
 
-        status_to_set = "disqualified" if disqualify_reasons else "completed"
+        status_to_set = "fail" if fail_reasons else "completed"
 
         db.execute(
             text(f"UPDATE \"{table_name}\" SET end_time = :ts, status = :status WHERE id = :pid"),
@@ -2179,10 +2179,10 @@ async def record_rfid_end_from_listener(
         )
         db.commit()
         
-        disqualify_note = f" (disqualified: {', '.join(disqualify_reasons)})" if disqualify_reasons else ""
+        fail_note = f" (fail: {', '.join(fail_reasons)})" if fail_reasons else ""
         response = RFIDHitResponse(
             success=True,
-            message=f"End time recorded, status set to {status_to_set}{disqualify_note}",
+            message=f"End time recorded, status set to {status_to_set}{fail_note}",
             rfid_tag=rfid_tag
         )
         return create_success_response(response.model_dump())

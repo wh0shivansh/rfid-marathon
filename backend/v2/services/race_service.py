@@ -243,7 +243,7 @@ class RaceService:
                     CONSTRAINT uq_{table_name}_race_army_number UNIQUE (race_id, army_number),
                     CONSTRAINT check_{table_name}_age CHECK (age >= 5 AND age <= 120),
                     CONSTRAINT check_{table_name}_gender CHECK (gender IN ('M', 'F', 'O')),
-                    CONSTRAINT check_{table_name}_status CHECK (status IN ('registered', 'grace', 'running', 'completed', 'disqualified'))
+                    CONSTRAINT check_{table_name}_status CHECK (status IN ('registered', 'grace', 'running', 'completed', 'fail'))
                 );
             """)
             

@@ -145,8 +145,8 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
   }
 
   function getRemarks(race, age, durationMs, midTime) {
-    if (!midTime) return 'disqualified';
-    if (!race || durationMs === null || durationMs === undefined || !age) return 'disqualified';
+    if (!midTime) return 'fail';
+    if (!race || durationMs === null || durationMs === undefined || !age) return 'fail';
     const durationSec = durationMs / 1000;
     let thresholds = null;
     if (age < 30) {
@@ -169,7 +169,7 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
       };
     }
 
-    if (durationSec > thresholds.satisfactory) return 'disqualified';
+    if (durationSec > thresholds.satisfactory) return 'fail';
     if (durationSec <= thresholds.excellent) return 'excellent';
     if (durationSec <= thresholds.good) return 'good';
     return 'satisfied';
@@ -266,7 +266,7 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
               <option value="excellent" ${remarksFilter === 'excellent' ? 'selected' : ''}>Excellent</option>
               <option value="good" ${remarksFilter === 'good' ? 'selected' : ''}>Good</option>
               <option value="satisfied" ${remarksFilter === 'satisfied' ? 'selected' : ''}>Satisfied</option>
-              <option value="disqualified" ${remarksFilter === 'disqualified' ? 'selected' : ''}>Disqualified</option>
+              <option value="fail" ${remarksFilter === 'fail' ? 'selected' : ''}>fail</option>
             </select>
 
             <button id="scoreboard-clear-filters" style="padding: 8px 12px; background: #1f2937; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.9em; cursor: pointer;">Clear filters</button>
@@ -306,8 +306,8 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
                       const rankNum = Number(rank);
                       const isTop3 = Number.isFinite(rankNum) && rankNum >= 1 && rankNum <= 3;
                       const medalColor = rankNum === 1 ? '#fbbf24' : rankNum === 2 ? '#94a3b8' : rankNum === 3 ? '#cd7f32' : '';
-                      const remarks = p.remarks || 'disqualified';
-                      const remarkColor = remarks === 'disqualified' ? '#ef4444' : remarks === 'excellent' ? '#10b981' : remarks === 'good' ? '#f59e0b' : '#60a5fa';
+                      const remarks = p.remarks || 'fail';
+                      const remarkColor = remarks === 'fail' ? '#ef4444' : remarks === 'excellent' ? '#10b981' : remarks === 'good' ? '#f59e0b' : '#60a5fa';
 
                       return `
                         <tr style="border-bottom: 1px solid #1f2937; transition: background 0.2s;" class="scoreboard-row">

@@ -139,14 +139,6 @@ async def add_to_cache(entry: Dict[str, Any]) -> None:
 
 async def flush_cache_once() -> None:
     async with cache_lock:
-        try:
-            cache_len = len(rfid_cache)
-        except Exception:
-            cache_len = 0
-        logger.debug(f"[BULK_FLUSH] cache_size_before_flush={cache_len}")
-        if not rfid_cache:
-            logger.debug("[BULK_FLUSH] cache empty, skipping flush")
-            return
         batch = list(rfid_cache)
         rfid_cache.clear()
 
@@ -156,18 +148,19 @@ async def flush_cache_once() -> None:
             target_url = f"{BACKEND_URL}{BACKEND_BULK_ENDPOINT}"
             logger.debug(f"[BULK_FLUSH] Posting {len(batch)} entries to {target_url}")
             response = await client.post(target_url, json=payload)
-            # Log response details for troubleshooting
-            try:
-                resp_text = response.text
-            except Exception:
-                resp_text = "<unreadable response body>"
-            logger.info(f"[BULK_FLUSH] POST {target_url} -> {response.status_code} \nresponse_body={resp_text}\npayload_len={len(batch)}")
+
+            print(f"MID\t\t\t\t\t\tEND")
+            mid_entries = [entry for entry in batch if entry.get("reader_id") == 2]
+            end_entries = [entry for entry in batch if entry.get("reader_id") == 3]
+            for i in range(max(len(mid_entries), len(end_entries))):
+                print(f"{mid_entries[i].get('rfid') if i < len(mid_entries) else ''}\t\t\t{end_entries[i].get('rfid') if i < len(end_entries) else ''}")
             if response.status_code not in (200, 201):
                 raise httpx.HTTPStatusError(
                     f"Unexpected status code: {response.status_code}",
                     request=response.request,
                     response=response
                 )
+            logger.info(f"[BULK_FLUSH] POST {target_url} -> {response.status_code}, flushed {len(batch)} entries")
     except Exception as exc:
         logger.error(f"[BULK_FLUSH] Failed to flush {len(batch)} entries: {exc}")
         # Requeue on failure

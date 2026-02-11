@@ -442,13 +442,13 @@ class Participant(Base):
     start_time = Column(DateTime(timezone=True), nullable=True)  # When participant started
     mid_time = Column(DateTime(timezone=True), nullable=True)  # Mid-point verification
     end_time = Column(DateTime(timezone=True), nullable=True)  # When participant finished
-    status = Column(String(20), default='registered', nullable=False)  # registered, grace, running, completed, disqualified
+    status = Column(String(20), default='registered', nullable=False)  # registered, grace, running, completed, fail
 
     __table_args__ = (
         UniqueConstraint('race_id', 'rfid_tag', name='uq_participant_race_rfid'),
         CheckConstraint("age >= 5 AND age <= 120", name='check_participant_age'),
         CheckConstraint("gender IN ('M', 'F', 'O')", name='check_participant_gender'),
-        CheckConstraint("status IN ('registered', 'grace', 'running', 'completed', 'disqualified')", name='check_participant_status'),
+        CheckConstraint("status IN ('registered', 'grace', 'running', 'completed', 'fail')", name='check_participant_status'),
         Index('idx_participants_race_id', 'race_id'),
         Index('idx_participants_rfid_tag', 'rfid_tag'),
         Index('idx_participants_status', 'status'),
