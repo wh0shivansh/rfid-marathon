@@ -153,9 +153,9 @@ async def flush_cache_once() -> None:
             logger.debug(f"[BULK_FLUSH] Posting {len(batch)} entries to {target_url}")
             response = await client.post(target_url, json=payload)
 
-            print(f"MID\t\t\t\t\t\tEND")
             mid_entries = [entry for entry in batch if entry.get("reader_id") == 2]
             end_entries = [entry for entry in batch if entry.get("reader_id") == 3]
+            print(f"MID ({len(mid_entries)})\t\t\t\t\t\tEND ({len(end_entries)})")
             for i in range(max(len(mid_entries), len(end_entries))):
                 print(f"{mid_entries[i].get('rfid') if i < len(mid_entries) else ''}\t\t\t{end_entries[i].get('rfid') if i < len(end_entries) else ''}")
             if response.status_code not in (200, 201):
