@@ -29,4 +29,7 @@ Write-Host "Building Control Hub..."
 Set-Location (Join-Path $root "control-hub")
 .\build_control_hub.ps1
 
+
 Write-Host "All builds completed successfully!"
+deactivate
+cd ..

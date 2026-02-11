@@ -726,6 +726,11 @@ def _normalize_bulk_header(value: Any) -> str:
     normalized = re.sub(r"[^a-z0-9]+", " ", raw).strip()
     aliases = {
         "s no": "s.no",
+        "s/no": "s.no",
+        "s/number": "s.no",
+        "s/ number": "s.no",
+        "s / number": "s.no",
+        "s /number": "s.no",
         "sno": "s.no",
         "sr no": "s.no",
         "serial no": "s.no",
