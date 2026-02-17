@@ -2,6 +2,62 @@
 // All JavaScript logic is in app.js
 // Shows only COMPLETED races with participant time calculations
 
+const CATEGORY_CONFIG = { // taken from backend constants.py for easy access in Scoreboard view
+  BPET: {
+    label: 'BPET',
+    levels: ['Excellent', 'Good', 'Satisfactory'],
+    ageGroups: [
+      { key: 'upto30', label: 'Up to 30', max: 30, timeKey: 'bpet_age_upto30' },
+      { key: 'upto40', label: '30 to 40', max: 40, timeKey: 'bpet_age_upto40' },
+      { key: '40_45', label: '40 to 45', max: 45, timeKey: 'bpet_age_40_45' },
+    ],
+  },
+  CPT: {
+    label: 'CPT',
+    levels: ['Superb', 'Excellent', 'Good', 'Satisfactory'],
+    ageGroups: [
+      { key: 'upto35', label: 'Up to 35', max: 35, timeKey: 'cpt_age_upto35' },
+      { key: '35_45', label: '35 to 45', max: 45, timeKey: 'cpt_age_35_45' },
+      { key: '45_50', label: '45 to 50', max: 50, timeKey: 'cpt_age_45_50' },
+      { key: '50_55', label: '50 to 55', max: 55, timeKey: 'cpt_age_50_55' },
+      { key: '55_60', label: '55 to 60', max: 60, timeKey: 'cpt_age_55_60' },
+    ],
+  },
+  PPT: {
+    label: 'PPT',
+    levels: ['Excellent', 'Good', 'Satisfactory'],
+    ageGroups: [
+      { key: 'upto30', label: 'Up to 30', max: 30, timeKey: 'ppt_age_upto30' },
+      { key: '30_40', label: '30 to 40', max: 40, timeKey: 'ppt_age_30_40' },
+      { key: '40_45', label: '40 to 45', max: 45, timeKey: 'ppt_age_40_45' },
+      { key: '45_50', label: '45 to 50', max: 50, timeKey: 'ppt_age_45_50' },
+    ],
+  },
+};
+
+function getRaceCategoryConfig(race) {
+  const category = race?.race_category || 'BPET';
+  return CATEGORY_CONFIG[category] || CATEGORY_CONFIG.BPET;
+}
+
+function getAgeGroupForAge(age, config) {
+  let prevMax = null;
+  for (const group of config.ageGroups) {
+    if (prevMax === null) {
+      if (age <= group.max) return group;
+    } else if (age > prevMax && age <= group.max) {
+      return group;
+    }
+    prevMax = group.max;
+  }
+  return null;
+}
+
+function normalizeRemarkLabel(label) {
+  if (label.toLowerCase() === 'satisfactory') return 'satisfied';
+  return label.toLowerCase();
+}
+
 export function renderScoreboard(races = [], participants = [], selectedRaceId = null, options = {}) {
   // Filter only completed races
   const completedRaces = races.filter(r => r.status === 'completed');
@@ -67,15 +123,15 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
     });
   }
 
+  const categoryConfig = getRaceCategoryConfig(selectedRace);
+
   // Apply age category filter
   if (ageFilter) {
     participantsFiltered = participantsFiltered.filter(p => {
       const age = Number(p.age);
       if (!Number.isFinite(age)) return false;
-      if (ageFilter === 'upto30') return age <= 30;
-      if (ageFilter === 'upto40') return age > 30 && age <= 40;
-      if (ageFilter === '40_45') return age > 40 && age <= 45;
-      return true;
+      const group = getAgeGroupForAge(age, categoryConfig);
+      return group ? group.key === ageFilter : false;
     });
   }
 
@@ -137,7 +193,9 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
 
   function getRaceStartTime(race) {
     if (!race) return null;
-    const times = [race.up30start_time, race.upto40start_time, race['40_45start_time'], race.start_time_40_45]
+    const config = getRaceCategoryConfig(race);
+    const startTimesKey = `${config.label.toLowerCase()}_start_time`;
+    const times = (Array.isArray(race[startTimesKey]) ? race[startTimesKey] : [])
       .filter(Boolean)
       .map(t => new Date(t).getTime());
     if (!times.length) return null;
@@ -148,30 +206,24 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
     if (!midTime) return 'fail';
     if (!race || durationMs === null || durationMs === undefined || !age) return 'fail';
     const durationSec = durationMs / 1000;
-    let thresholds = null;
-    if (age < 30) {
-      thresholds = {
-        excellent: race.age_upto30_excellent,
-        good: race.age_upto30_good,
-        satisfactory: race.age_upto30_satisfactory,
-      };
-    } else if (age < 40) {
-      thresholds = {
-        excellent: race.age_upto40_excellent,
-        good: race.age_upto40_good,
-        satisfactory: race.age_upto40_satisfactory,
-      };
-    } else {
-      thresholds = {
-        excellent: race.age_40to45_excellent,
-        good: race.age_40to45_good,
-        satisfactory: race.age_40to45_satisfactory,
-      };
+    const config = getRaceCategoryConfig(race);
+    const group = getAgeGroupForAge(Number(age), config);
+    if (!group) return 'fail';
+    const thresholds = Array.isArray(race[group.timeKey]) ? race[group.timeKey].map(Number) : null;
+    if (!thresholds || thresholds.length === 0) return 'fail';
+
+    const maxAllowed = thresholds[thresholds.length - 1];
+    if (durationSec > maxAllowed) return 'fail';
+
+    if (thresholds.length === 4) {
+      if (durationSec <= thresholds[0]) return 'superb';
+      if (durationSec <= thresholds[1]) return 'excellent';
+      if (durationSec <= thresholds[2]) return 'good';
+      return 'satisfied';
     }
 
-    if (durationSec > thresholds.satisfactory) return 'fail';
-    if (durationSec <= thresholds.excellent) return 'excellent';
-    if (durationSec <= thresholds.good) return 'good';
+    if (durationSec <= thresholds[0]) return 'excellent';
+    if (durationSec <= thresholds[1]) return 'good';
     return 'satisfied';
   }
 
@@ -254,18 +306,19 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
           `}
           ${selectedRaceId ? `
           <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-            <select id="scoreboard-age-filter-dropdown" style="padding: 8px 10px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.9em; cursor: pointer; min-width: 180px;">
+            <select id="scoreboard-age-filter-dropdown" style="padding: 8px 10px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.9em; cursor: pointer; min-width: 150px;">
               <option value="">Age category</option>
-              <option value="upto30" ${ageFilter === 'upto30' ? 'selected' : ''}>Upto 30</option>
-              <option value="upto40" ${ageFilter === 'upto40' ? 'selected' : ''}>Upto 40</option>
-              <option value="40_45" ${ageFilter === '40_45' ? 'selected' : ''}>40 - 45</option>
+              ${categoryConfig.ageGroups.map(group => `
+                <option value="${group.key}" ${ageFilter === group.key ? 'selected' : ''}>${group.label}</option>
+              `).join('')}
             </select>
 
-            <select id="scoreboard-remarks-filter-dropdown" style="padding: 8px 10px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.9em; cursor: pointer; min-width: 180px;">
+            <select id="scoreboard-remarks-filter-dropdown" style="padding: 8px 10px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.9em; cursor: pointer; min-width: 150px;">
               <option value="">Remarks</option>
-              <option value="excellent" ${remarksFilter === 'excellent' ? 'selected' : ''}>Excellent</option>
-              <option value="good" ${remarksFilter === 'good' ? 'selected' : ''}>Good</option>
-              <option value="satisfied" ${remarksFilter === 'satisfied' ? 'selected' : ''}>Satisfied</option>
+              ${categoryConfig.levels.map(label => {
+                const value = normalizeRemarkLabel(label);
+                return `<option value="${value}" ${remarksFilter === value ? 'selected' : ''}>${label}</option>`;
+              }).join('')}
               <option value="fail" ${remarksFilter === 'fail' ? 'selected' : ''}>Fail</option>
             </select>
 

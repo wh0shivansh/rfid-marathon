@@ -26,6 +26,7 @@ from constants import (
     RFID_TAG_MIN_LENGTH,
     RFID_TAG_MAX_LENGTH,
     RaceStatus,
+    RaceCategory,
 )
 from basefunctions import validate_rfid_tag, generate_uuid
 
@@ -68,6 +69,53 @@ class TokenRefreshRequest(BaseModel):
 # Race Schemas
 # ---------------------------------------------------------------------------
 
+_QUALIFYING_DEFAULTS = {
+    "bpet_age_upto30": [1500.0, 1578.0, 1620.0],
+    "bpet_age_upto40": [1698.0, 1800.0, 1860.0],
+    "bpet_age_40_45": [1878.0, 1980.0, 2100.0],
+    "cpt_age_upto35": [840.0, 900.0, 960.0, 1050.0],
+    "cpt_age_35_45": [960.0, 1020.0, 1080.0, 1200.0],
+    "cpt_age_45_50": [1020.0, 1080.0, 1140.0, 1230.0],
+    "cpt_age_50_55": [1680.0, 1800.0, 1920.0, 2040.0],
+    "cpt_age_55_60": [1920.0, 2040.0, 2160.0, 2280.0],
+    "ppt_age_upto30": [540.0, 570.0, 600.0],
+    "ppt_age_30_40": [630.0, 660.0, 690.0],
+    "ppt_age_40_45": [690.0, 720.0, 750.0],
+    "ppt_age_45_50": [780.0, 840.0, 900.0],
+}
+
+_QUALIFYING_LIST_LENGTHS = {
+    "bpet_age_upto30": 3,
+    "bpet_age_upto40": 3,
+    "bpet_age_40_45": 3,
+    "cpt_age_upto35": 4,
+    "cpt_age_35_45": 4,
+    "cpt_age_45_50": 4,
+    "cpt_age_50_55": 4,
+    "cpt_age_55_60": 4,
+    "ppt_age_upto30": 3,
+    "ppt_age_30_40": 3,
+    "ppt_age_40_45": 3,
+    "ppt_age_45_50": 3,
+}
+
+
+def _validate_qualifying_list(value: Optional[List[float]], field_name: str) -> List[float]:
+    if value is None:
+        return _QUALIFYING_DEFAULTS[field_name].copy()
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a list")
+    expected = _QUALIFYING_LIST_LENGTHS[field_name]
+    if len(value) != expected:
+        raise ValueError(f"{field_name} must have {expected} values")
+    try:
+        normalized = [float(v) for v in value]
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must contain numeric values")
+    if any(v < 0 for v in normalized):
+        raise ValueError(f"{field_name} values must be >= 0")
+    return normalized
+
 class RaceCreateRequest(BaseModel):
     """Create race request schema"""
     name: str = Field(..., min_length=3, max_length=200)
@@ -76,16 +124,28 @@ class RaceCreateRequest(BaseModel):
     scheduled_date: str = Field(..., description="ISO 8601 date")
     description: Optional[str] = Field(None, max_length=1000)
     copy_from_race_id: Optional[str] = Field(None, description="Optional race ID to copy participants from")
-    # Age category qualifying times (in seconds) - defaults are in minutes converted to seconds
-    age_upto30_excellent: float = Field(1500, ge=0)  # 25 min = 1500 sec
-    age_upto30_good: float = Field(1578, ge=0)  # 26.30 min = 1578 sec
-    age_upto30_satisfactory: float = Field(1620, ge=0)  # 27 min = 1620 sec
-    age_upto40_excellent: float = Field(1698, ge=0)  # 28.30 min = 1698 sec
-    age_upto40_good: float = Field(1800, ge=0)  # 30 min = 1800 sec
-    age_upto40_satisfactory: float = Field(1860, ge=0)  # 31 min = 1860 sec
-    age_40to45_excellent: float = Field(1878, ge=0)  # 31.30 min = 1878 sec
-    age_40to45_good: float = Field(1980, ge=0)  # 33 min = 1980 sec
-    age_40to45_satisfactory: float = Field(2100, ge=0)  # 35 min = 2100 sec
+    race_category: RaceCategory = Field(RaceCategory.BPET)
+    # Qualifying times (seconds) stored as per-age lists
+    bpet_age_upto30: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_upto30"].copy())
+    bpet_age_upto40: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_upto40"].copy())
+    bpet_age_40_45: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_40_45"].copy())
+    cpt_age_upto35: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_upto35"].copy())
+    cpt_age_35_45: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_35_45"].copy())
+    cpt_age_45_50: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_45_50"].copy())
+    cpt_age_50_55: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_50_55"].copy())
+    cpt_age_55_60: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_55_60"].copy())
+    ppt_age_upto30: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["ppt_age_upto30"].copy())
+    ppt_age_30_40: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["ppt_age_30_40"].copy())
+    ppt_age_40_45: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["ppt_age_40_45"].copy())
+    ppt_age_45_50: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["ppt_age_45_50"].copy())
+
+    @validator(*_QUALIFYING_LIST_LENGTHS.keys(), pre=True)
+    def validate_qualifying_lists(cls, v, values, **kwargs):
+        field = kwargs.get("field")
+        field_name = getattr(field, "name", None)
+        if not field_name:
+            return v
+        return _validate_qualifying_list(v, field_name)
 
 
 class RaceUpdateRequest(BaseModel):
@@ -96,6 +156,29 @@ class RaceUpdateRequest(BaseModel):
     scheduled_date: Optional[str] = None
     description: Optional[str] = Field(None, max_length=1000)
     status: Optional[RaceStatus] = None
+    race_category: Optional[RaceCategory] = None
+    bpet_age_upto30: Optional[List[float]] = None
+    bpet_age_upto40: Optional[List[float]] = None
+    bpet_age_40_45: Optional[List[float]] = None
+    cpt_age_upto35: Optional[List[float]] = None
+    cpt_age_35_45: Optional[List[float]] = None
+    cpt_age_45_50: Optional[List[float]] = None
+    cpt_age_50_55: Optional[List[float]] = None
+    cpt_age_55_60: Optional[List[float]] = None
+    ppt_age_upto30: Optional[List[float]] = None
+    ppt_age_30_40: Optional[List[float]] = None
+    ppt_age_40_45: Optional[List[float]] = None
+    ppt_age_45_50: Optional[List[float]] = None
+
+    @validator(*_QUALIFYING_LIST_LENGTHS.keys(), pre=True)
+    def validate_update_qualifying_lists(cls, v, values, **kwargs):
+        if v is None:
+            return None
+        field = kwargs.get("field")
+        field_name = getattr(field, "name", None)
+        if not field_name:
+            return v
+        return _validate_qualifying_list(v, field_name)
 
 
 class RaceResponse(BaseModel):
@@ -107,23 +190,27 @@ class RaceResponse(BaseModel):
     scheduled_date: datetime
     description: Optional[str]
     status: RaceStatus
+    race_category: RaceCategory
     created_at: datetime
     updated_at: datetime
     table_name: str
     participant_count: int = 0
-    # Age category qualifying times (in seconds)
-    age_upto30_excellent: float = 1500
-    age_upto30_good: float = 1578
-    age_upto30_satisfactory: float = 1620
-    age_upto40_excellent: float = 1698
-    age_upto40_good: float = 1800
-    age_upto40_satisfactory: float = 1860
-    age_40to45_excellent: float = 1878
-    age_40to45_good: float = 1980
-    age_40to45_satisfactory: float = 2100
-    up30start_time: Optional[datetime] = None
-    upto40start_time: Optional[datetime] = None
-    start_time_40_45: Optional[datetime] = Field(None, alias="40_45start_time")
+    # Qualifying times (seconds)
+    bpet_age_upto30: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_upto30"].copy())
+    bpet_age_upto40: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_upto40"].copy())
+    bpet_age_40_45: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_40_45"].copy())
+    cpt_age_upto35: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_upto35"].copy())
+    cpt_age_35_45: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_35_45"].copy())
+    cpt_age_45_50: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_45_50"].copy())
+    cpt_age_50_55: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_50_55"].copy())
+    cpt_age_55_60: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["cpt_age_55_60"].copy())
+    ppt_age_upto30: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["ppt_age_upto30"].copy())
+    ppt_age_30_40: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["ppt_age_30_40"].copy())
+    ppt_age_40_45: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["ppt_age_40_45"].copy())
+    ppt_age_45_50: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["ppt_age_45_50"].copy())
+    bpet_start_time: Optional[List[str]] = None
+    cpt_start_time: Optional[List[str]] = None
+    ppt_start_time: Optional[List[str]] = None
     end_time: Optional[datetime] = None
 
     class Config:
@@ -299,12 +386,7 @@ class RaceStartRequest(BaseModel):
 
 class RaceStartTimesRequest(BaseModel):
     """Request to set per-age start times for a race"""
-    up30start_time: str = Field(..., description="ISO 8601 timestamp for <30")
-    upto40start_time: str = Field(..., description="ISO 8601 timestamp for 30-40")
-    start_time_40_45: str = Field(..., alias="40_45start_time", description="ISO 8601 timestamp for 40-45")
-
-    class Config:
-        populate_by_name = True
+    start_times: List[str] = Field(..., description="ISO 8601 timestamps in age-group order")
 
 
 class RaceStartResponse(BaseModel):
@@ -388,19 +470,28 @@ class Race(Base):
     description = Column(Text, nullable=True)
     status = Column(String(50), default=RaceStatus.CREATED.value, nullable=False)
     table_name = Column(String(128), nullable=False, unique=True)  # Maps to participants table for this race
-    # Age category qualifying times (in seconds) - defaults match standard race times
-    age_upto30_excellent = Column(Float, nullable=False, default=1500)  # 25 min
-    age_upto30_good = Column(Float, nullable=False, default=1578)  # 26.30 min
-    age_upto30_satisfactory = Column(Float, nullable=False, default=1620)  # 27 min
-    age_upto40_excellent = Column(Float, nullable=False, default=1698)  # 28.30 min
-    age_upto40_good = Column(Float, nullable=False, default=1800)  # 30 min
-    age_upto40_satisfactory = Column(Float, nullable=False, default=1860)  # 31 min
-    age_40to45_excellent = Column(Float, nullable=False, default=1878)  # 31.30 min
-    age_40to45_good = Column(Float, nullable=False, default=1980)  # 33 min
-    age_40to45_satisfactory = Column(Float, nullable=False, default=2100)  # 35 min
-    up30start_time = Column(DateTime(timezone=True), nullable=True)  # Start time for <30
-    upto40start_time = Column(DateTime(timezone=True), nullable=True)  # Start time for 30-40
-    start_time_40_45 = Column("40_45start_time", DateTime(timezone=True), nullable=True)  # Start time for 40-45
+    race_category = Column(String(50), nullable=False, default=RaceCategory.BPET.value)  # e.g., 'BPET', 'CPT', 'PPT'
+
+    # Qualifying times (seconds) stored as JSONB lists per age group
+    bpet_age_upto30 = Column(JSONB, nullable=False, default=lambda: [1500.0, 1578.0, 1620.0])
+    bpet_age_upto40 = Column(JSONB, nullable=False, default=lambda: [1698.0, 1800.0, 1860.0])
+    bpet_age_40_45 = Column(JSONB, nullable=False, default=lambda: [1878.0, 1980.0, 2100.0])
+    cpt_age_upto35 = Column(JSONB, nullable=False, default=lambda: [840.0, 900.0, 960.0, 1050.0])
+    cpt_age_35_45 = Column(JSONB, nullable=False, default=lambda: [960.0, 1020.0, 1080.0, 1200.0])
+    cpt_age_45_50 = Column(JSONB, nullable=False, default=lambda: [1020.0, 1080.0, 1140.0, 1230.0])
+    cpt_age_50_55 = Column(JSONB, nullable=False, default=lambda: [1680.0, 1800.0, 1920.0, 2040.0])
+    cpt_age_55_60 = Column(JSONB, nullable=False, default=lambda: [1920.0, 2040.0, 2160.0, 2280.0])
+    ppt_age_upto30 = Column(JSONB, nullable=False, default=lambda: [540.0, 570.0, 600.0])
+    ppt_age_30_40 = Column(JSONB, nullable=False, default=lambda: [630.0, 660.0, 690.0])
+    ppt_age_40_45 = Column(JSONB, nullable=False, default=lambda: [690.0, 720.0, 750.0])
+    ppt_age_45_50 = Column(JSONB, nullable=False, default=lambda: [780.0, 840.0, 900.0])
+
+    # Per-age start times stored as ordered lists (ISO strings)
+    bpet_start_time = Column(JSONB, nullable=True)
+    cpt_start_time = Column(JSONB, nullable=True)
+    ppt_start_time = Column(JSONB, nullable=True)
+
+
     end_time = Column(DateTime(timezone=True), nullable=True)  # When race was ended
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -409,8 +500,23 @@ class Race(Base):
     __table_args__ = (
         CheckConstraint('distance_meters >= 10 AND distance_meters <= 100000', name='check_race_distance'),
         CheckConstraint("status IN ('created', 'started', 'completed')", name='check_race_status'),
+        CheckConstraint("race_category IN ('BPET', 'CPT', 'PPT')", name='check_race_category'),
+        CheckConstraint("jsonb_typeof(bpet_age_upto30) = 'array' AND jsonb_array_length(bpet_age_upto30) = 3", name='check_bpet_age_upto30_len'),
+        CheckConstraint("jsonb_typeof(bpet_age_upto40) = 'array' AND jsonb_array_length(bpet_age_upto40) = 3", name='check_bpet_age_upto40_len'),
+        CheckConstraint("jsonb_typeof(bpet_age_40_45) = 'array' AND jsonb_array_length(bpet_age_40_45) = 3", name='check_bpet_age_40_45_len'),
+        CheckConstraint("jsonb_typeof(cpt_age_upto35) = 'array' AND jsonb_array_length(cpt_age_upto35) = 4", name='check_cpt_age_upto35_len'),
+        CheckConstraint("jsonb_typeof(cpt_age_35_45) = 'array' AND jsonb_array_length(cpt_age_35_45) = 4", name='check_cpt_age_35_45_len'),
+        CheckConstraint("jsonb_typeof(cpt_age_45_50) = 'array' AND jsonb_array_length(cpt_age_45_50) = 4", name='check_cpt_age_45_50_len'),
+        CheckConstraint("jsonb_typeof(cpt_age_50_55) = 'array' AND jsonb_array_length(cpt_age_50_55) = 4", name='check_cpt_age_50_55_len'),
+        CheckConstraint("jsonb_typeof(cpt_age_55_60) = 'array' AND jsonb_array_length(cpt_age_55_60) = 4", name='check_cpt_age_55_60_len'),
+        CheckConstraint("jsonb_typeof(ppt_age_upto30) = 'array' AND jsonb_array_length(ppt_age_upto30) = 3", name='check_ppt_age_upto30_len'),
+        CheckConstraint("jsonb_typeof(ppt_age_30_40) = 'array' AND jsonb_array_length(ppt_age_30_40) = 3", name='check_ppt_age_30_40_len'),
+        CheckConstraint("jsonb_typeof(ppt_age_40_45) = 'array' AND jsonb_array_length(ppt_age_40_45) = 3", name='check_ppt_age_40_45_len'),
+        CheckConstraint("jsonb_typeof(ppt_age_45_50) = 'array' AND jsonb_array_length(ppt_age_45_50) = 3", name='check_ppt_age_45_50_len'),
+        CheckConstraint("bpet_start_time IS NULL OR (jsonb_typeof(bpet_start_time) = 'array' AND jsonb_array_length(bpet_start_time) = 3)", name='check_bpet_start_time_len'),
+        CheckConstraint("cpt_start_time IS NULL OR (jsonb_typeof(cpt_start_time) = 'array' AND jsonb_array_length(cpt_start_time) = 5)", name='check_cpt_start_time_len'),
+        CheckConstraint("ppt_start_time IS NULL OR (jsonb_typeof(ppt_start_time) = 'array' AND jsonb_array_length(ppt_start_time) = 4)", name='check_ppt_start_time_len'),
         Index('idx_races_status', 'status'),
-        Index('idx_races_scheduled_date', 'scheduled_date'),
     )
 
 
@@ -424,7 +530,7 @@ class Participant(Base):
     This model is NOT created during migrations but serves as a template
     for dynamically created per-race participant tables.
     """
-    __tablename__ = "FiveKmRaceParticipants"
+    __tablename__ = "PerRaceTable"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=generate_uuid)
     race_id = Column(UUID(as_uuid=False), ForeignKey('races.id', ondelete='CASCADE'), nullable=False, index=True)

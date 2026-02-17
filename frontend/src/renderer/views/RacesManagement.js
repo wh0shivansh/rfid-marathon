@@ -1,12 +1,23 @@
 // Races Management View - HTML Only
 // All JavaScript logic is in app.js
 
-export function renderRacesManagement(races = []) {
+export function renderRacesManagement(races = [], selectedCategory = '') {
   return `
     <div class="page" style="background:#0b1220; min-height:100vh; color:#e2e8f0; padding:16px;">
       <!-- Header Section -->
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding: 20px; background: #111827; border-radius: 8px; border: 1px solid #1f2937;">
-        <h1 style="color: #e2e8f0; margin: 0; font-size: 24px; font-weight: 600;">Races Management</h1>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <h1 style="color: #e2e8f0; margin: 0; font-size: 24px; font-weight: 600;">Races Management</h1>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label for="race-category-filter" style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Filter</label>
+            <select id="race-category-filter" style="padding: 6px 10px; background: #0f172a; color: #cbd5e1; border: 1px solid #334155; border-radius: 4px; font-size: 12px;">
+              <option value="" ${selectedCategory === '' ? 'selected' : ''}>All categories</option>
+              <option value="BPET" ${selectedCategory === 'BPET' ? 'selected' : ''}>BPET</option>
+              <option value="CPT" ${selectedCategory === 'CPT' ? 'selected' : ''}>CPT</option>
+              <option value="PPT" ${selectedCategory === 'PPT' ? 'selected' : ''}>PPT</option>
+            </select>
+          </div>
+        </div>
         <button class="dark-btn-primary" id="create-new-race-btn" style="padding: 12px 24px; background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; transition: all 0.3s ease;"><span style="font-size: 1.2em;">+</span> Create New Race</button>
       </div>
 
@@ -36,6 +47,10 @@ export function renderRacesManagement(races = []) {
               
               <!-- Race Details -->
               <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="color: #94a3b8; font-size: 14px;">🏷️</span>
+                  <span style="color: #cbd5e1; font-size: 14px;">${race.race_category || 'BPET'}</span>
+                </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <span style="color: #94a3b8; font-size: 14px;">📏</span>
                   <span style="color: #cbd5e1; font-size: 14px;">${race.distance_meters}m</span>

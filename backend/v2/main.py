@@ -22,10 +22,11 @@ from dateutil import parser
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from multiprocessing import freeze_support
-from typing import Optional, Any, cast
+from typing import Optional, Any, cast, List
+import json
 
 import pandas as pd
-from docx import Document
+from docx import Document # type: ignore
 
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Body, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -34,7 +35,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from sqlalchemy.engine import CursorResult
 
-from constants import API_PREFIX, RaceStatus, RACE_STATUS_TRANSITIONS, ErrorMessages, FeatureFlags, BULK_HEADERS, RFID_PREFIX
+from constants import API_PREFIX, RaceStatus, RACE_STATUS_TRANSITIONS, ErrorMessages, FeatureFlags, BULK_HEADERS, RFID_PREFIX, RACE_CATEGORY_CONFIG
 from database.connection import (
     initialize_database,
     shutdown_database,
@@ -379,15 +380,19 @@ async def create_race(
         description=payload.description,
         created_by=_user["sub"],
         copy_from_race_id=payload.copy_from_race_id,
-        age_upto30_excellent=payload.age_upto30_excellent,
-        age_upto30_good=payload.age_upto30_good,
-        age_upto30_satisfactory=payload.age_upto30_satisfactory,
-        age_upto40_excellent=payload.age_upto40_excellent,
-        age_upto40_good=payload.age_upto40_good,
-        age_upto40_satisfactory=payload.age_upto40_satisfactory,
-        age_40to45_excellent=payload.age_40to45_excellent,
-        age_40to45_good=payload.age_40to45_good,
-        age_40to45_satisfactory=payload.age_40to45_satisfactory
+        race_category=str(payload.race_category.value if hasattr(payload.race_category, "value") else payload.race_category),
+        bpet_age_upto30=payload.bpet_age_upto30,
+        bpet_age_upto40=payload.bpet_age_upto40,
+        bpet_age_40_45=payload.bpet_age_40_45,
+        cpt_age_upto35=payload.cpt_age_upto35,
+        cpt_age_35_45=payload.cpt_age_35_45,
+        cpt_age_45_50=payload.cpt_age_45_50,
+        cpt_age_50_55=payload.cpt_age_50_55,
+        cpt_age_55_60=payload.cpt_age_55_60,
+        ppt_age_upto30=payload.ppt_age_upto30,
+        ppt_age_30_40=payload.ppt_age_30_40,
+        ppt_age_40_45=payload.ppt_age_40_45,
+        ppt_age_45_50=payload.ppt_age_45_50
     )
     race_response = RaceResponse.model_validate(race, from_attributes=True)
     return create_success_response(race_response.model_dump())
@@ -539,19 +544,25 @@ async def update_race_start_times(
     """Set per-age start times for a race."""
     race = race_service.get_race(db=db, race_id=race_id)
 
+    config = _get_race_category_config(getattr(race, "race_category", None))
+    expected_len = len(config["age_max"])
+
+    if not payload.start_times or len(payload.start_times) != expected_len:
+        raise ValidationError(f"start_times must contain {expected_len} values for this race category")
+
+    parsed_times = []
     try:
-        up30_time = parser.isoparse(payload.up30start_time)
-        upto40_time = parser.isoparse(payload.upto40start_time)
-        start_40_45_time = parser.isoparse(payload.start_time_40_45)
+        for value in payload.start_times:
+            parsed = parser.isoparse(value)
+            parsed_times.append(parsed.isoformat())
     except Exception as exc:
         raise ValidationError(f"Invalid start time format: {exc}")
 
+    start_times_key = config["start_times_key"]
     race = race_service.update_race(
         db=db,
         race_id=race_id,
-        up30start_time=up30_time,
-        upto40start_time=upto40_time,
-        start_time_40_45=start_40_45_time,
+        **{start_times_key: parsed_times},
     )
 
     return create_success_response({
@@ -583,46 +594,57 @@ async def start_race(
     table_name_value = getattr(race, "table_name", None)
     table_name = table_name_value if isinstance(table_name_value, str) and table_name_value else f"race_{race.name}_participants"
 
-    up30_time = cast(Optional[datetime], race.up30start_time)
-    upto40_time = cast(Optional[datetime], race.upto40start_time)
-    start_40_45_time = cast(Optional[datetime], race.start_time_40_45)
+    config = _get_race_category_config(getattr(race, "race_category", None))
+    start_times_key = config["start_times_key"]
+    max_ages = config["age_max"]
+    raw_start_times = _read_jsonb_list(getattr(race, start_times_key, None)) or []
 
-    if not up30_time or not upto40_time or not start_40_45_time:
+    if len(raw_start_times) != len(max_ages):
         raise ValidationError("Race start times are not configured for all age groups")
+
+    parsed_start_times: List[datetime] = []
+    for value in raw_start_times:
+        parsed = _coerce_datetime(value, None)
+        if not parsed:
+            raise ValidationError("Race start times contain invalid timestamps")
+        parsed_start_times.append(parsed)
 
     # Promote race to STARTED
     race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.STARTED)
 
     assigned_count = 0
     try:
+        case_lines = []
+        prev_max = None
+        params = {}
+        for idx, max_age in enumerate(max_ages):
+            if prev_max is None:
+                condition = f"age <= {max_age}"
+            else:
+                condition = f"age > {prev_max} AND age <= {max_age}"
+            case_lines.append(f"WHEN {condition} THEN :start_{idx}")
+            params[f"start_{idx}"] = parsed_start_times[idx]
+            prev_max = max_age
+
+        case_sql = "\n".join(case_lines)
         update_result = cast(CursorResult, db.execute(
             text(
                 f"""
                 UPDATE "{table_name}"
                 SET start_time = CASE
-                    WHEN age < 30 THEN :up30
-                    WHEN age >= 30 AND age < 40 THEN :upto40
-                    WHEN age >= 40 AND age <= 45 THEN :start_40_45
+                    {case_sql}
                     ELSE NULL
                 END
                 """
             ),
-            {
-                "up30": up30_time,
-                "upto40": upto40_time,
-                "start_40_45": start_40_45_time,
-            }
+            params
         ))
         assigned_count = update_result.rowcount if update_result.rowcount is not None else 0
         db.commit()
     except Exception:
         db.rollback()
 
-    start_time_assigned = min(
-        cast(datetime, up30_time),
-        cast(datetime, upto40_time),
-        cast(datetime, start_40_45_time),
-    ).isoformat()
+    start_time_assigned = min(parsed_start_times).isoformat()
 
     return create_success_response({
         "message": f"Race activated successfully, {assigned_count} participants assigned start time",
@@ -1675,14 +1697,68 @@ def _coerce_datetime(value: Any, fallback_tz: Optional[tzinfo]) -> Optional[date
     return dt
 
 
-def _get_max_allowed_seconds(age: Optional[int], race_row: Any) -> Optional[float]:
+
+def _normalize_race_category(value: Any) -> str:
+    if value is None:
+        return "BPET"
+    if hasattr(value, "value"):
+        return str(value.value)
+    return str(value)
+
+
+def _get_race_category_config(value: Any) -> dict:
+    category = _normalize_race_category(value)
+    return RACE_CATEGORY_CONFIG.get(category, RACE_CATEGORY_CONFIG["BPET"])
+
+
+def _get_age_group_index(age: Optional[int], max_ages: List[int]) -> Optional[int]:
     if age is None:
         return None
-    if age <= 30:
-        return getattr(race_row, "age_upto30_satisfactory", None)
-    if age <= 40:
-        return getattr(race_row, "age_upto40_satisfactory", None)
-    return getattr(race_row, "age_40to45_satisfactory", None)
+    for idx, max_age in enumerate(max_ages):
+        if age <= max_age:
+            return idx
+    return None
+
+
+def _read_jsonb_list(value: Any) -> Optional[List[Any]]:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else None
+        except Exception:
+            return None
+    return None
+
+
+def _get_start_times_from_race_row(race_row: Any) -> List[datetime]:
+    config = _get_race_category_config(getattr(race_row, "race_category", None))
+    key = config["start_times_key"]
+    raw = _read_jsonb_list(getattr(race_row, key, None)) or []
+    times = []
+    for value in raw:
+        dt = _coerce_datetime(value, None)
+        if dt:
+            times.append(dt)
+    return times
+
+
+def _get_max_allowed_seconds(age: Optional[int], race_row: Any) -> Optional[float]:
+    config = _get_race_category_config(getattr(race_row, "race_category", None))
+    group_index = _get_age_group_index(age, config["age_max"])
+    if group_index is None:
+        return None
+    key = config["qualifying_keys"][group_index]
+    values = _read_jsonb_list(getattr(race_row, key, None))
+    if not values:
+        return None
+    try:
+        return float(values[-1])
+    except (TypeError, ValueError):
+        return None
 
 
 async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[str] = None) -> dict:
@@ -1726,8 +1802,10 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         
         # Find the started race
         query = text("""
-            SELECT id, name, table_name, scheduled_date, status, start_time,
-                   age_upto30_satisfactory, age_upto40_satisfactory, age_40to45_satisfactory
+            SELECT id, name, table_name, scheduled_date, status, race_category,
+                   bpet_age_upto30, bpet_age_upto40, bpet_age_40_45, bpet_start_time,
+                   cpt_age_upto35, cpt_age_35_45, cpt_age_45_50, cpt_age_50_55, cpt_age_55_60, cpt_start_time,
+                   ppt_age_upto30, ppt_age_30_40, ppt_age_40_45, ppt_age_45_50, ppt_start_time
             FROM races 
             WHERE status = :status
             LIMIT 1
@@ -1782,9 +1860,9 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         
         mid_time = getattr(participant_row, "mid_time", None)
         participant_age = getattr(participant_row, "age", None)
-        race_start_time = getattr(race_row, "start_time", None)
+        race_start_times = _get_start_times_from_race_row(race_row)
         participant_start_time = getattr(participant_row, "start_time", None)
-        effective_start_time = participant_start_time or race_start_time
+        effective_start_time = participant_start_time or (race_start_times[0] if race_start_times else None)
 
         fallback_tz = current_time.tzinfo
         effective_start_time = _coerce_datetime(effective_start_time, cast(Optional[tzinfo], fallback_tz))
@@ -2110,8 +2188,10 @@ async def record_rfid_end_from_listener(
     try:
         race_row = db.execute(
             text("""
-                SELECT id, name, table_name, start_time,
-                       age_upto30_satisfactory, age_upto40_satisfactory, age_40to45_satisfactory
+                SELECT id, name, table_name, race_category,
+                       bpet_age_upto30, bpet_age_upto40, bpet_age_40_45, bpet_start_time,
+                       cpt_age_upto35, cpt_age_35_45, cpt_age_45_50, cpt_age_50_55, cpt_age_55_60, cpt_start_time,
+                       ppt_age_upto30, ppt_age_30_40, ppt_age_40_45, ppt_age_45_50, ppt_start_time
                 FROM races
                 WHERE status = :status
                 LIMIT 1
@@ -2156,9 +2236,12 @@ async def record_rfid_end_from_listener(
         current_time = get_current_timestamp_IST()
         mid_time = getattr(row, "mid_time", None)
         participant_age = getattr(row, "age", None)
-        race_start_time = getattr(race_row, "start_time", None)
+        race_start_times = _get_start_times_from_race_row(race_row)
         participant_start_time = getattr(row, "start_time", None)
-        effective_start_time = _coerce_datetime(participant_start_time or race_start_time, current_time.tzinfo)
+        effective_start_time = _coerce_datetime(
+            participant_start_time or (race_start_times[0] if race_start_times else None),
+            current_time.tzinfo
+        )
 
         fail_reasons = []
         if mid_time is None:

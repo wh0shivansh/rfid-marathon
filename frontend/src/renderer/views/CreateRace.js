@@ -2,6 +2,16 @@ export function renderCreateRace() {
   return `
     <div class="page">
       <div class="panel">
+        <div class="dark-form-group">
+          <label>Race Category</label>
+          <select name="race_category" id="race-category-select" required>
+            <option value="BPET">BPET</option>
+            <option value="CPT">CPT</option>
+            <option value="PPT">PPT</option>
+          </select>
+        </div>
+      </div>
+      <div class="panel">
         <div class="panel-header">Create Race</div>
         <form id="create-race-form" class="form-grid">
           <div class="dark-form-group">
@@ -42,32 +52,8 @@ export function renderCreateRace() {
               </div>
             </div>
             
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px;">
-              <div style="font-weight: bold; color: #cbd5e1;">Age Group</div>
-              <div style="font-weight: bold; color: #cbd5e1;">Excellent</div>
-              <div style="font-weight: bold; color: #cbd5e1;">Good</div>
-              <div style="font-weight: bold; color: #cbd5e1;">Satisfactory</div>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px;">
-              <div style="color: #cbd5e1; padding: 8px 0;">Up to 30 yrs</div>
-              <div class="dark-form-group"><input name="age_upto30_excellent" type="number" step="0.01" min="0" placeholder="25" /></div>
-              <div class="dark-form-group"><input name="age_upto30_good" type="number" step="0.01" min="0" placeholder="26.30" /></div>
-              <div class="dark-form-group"><input name="age_upto30_satisfactory" type="number" step="0.01" min="0" placeholder="27" /></div>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px;">
-              <div style="color: #cbd5e1; padding: 8px 0;">Up to 40 yrs</div>
-              <div class="dark-form-group"><input name="age_upto40_excellent" type="number" step="0.01" min="0" placeholder="28.30" /></div>
-              <div class="dark-form-group"><input name="age_upto40_good" type="number" step="0.01" min="0" placeholder="30" /></div>
-              <div class="dark-form-group"><input name="age_upto40_satisfactory" type="number" step="0.01" min="0" placeholder="31" /></div>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
-              <div style="color: #cbd5e1; padding: 8px 0;">40 to 45 yrs</div>
-              <div class="dark-form-group"><input name="age_40to45_excellent" type="number" step="0.01" min="0" placeholder="31.30" /></div>
-              <div class="dark-form-group"><input name="age_40to45_good" type="number" step="0.01" min="0" placeholder="33" /></div>
-              <div class="dark-form-group"><input name="age_40to45_satisfactory" type="number" step="0.01" min="0" placeholder="35" /></div>
+            <div style="overflow-x: auto; overflow-y: hidden; border: 1px solid #334155; border-radius: 4px;">
+              <div id="qualifying-times-grid" style="min-width: min-content;"></div>
             </div>
           </div>
 

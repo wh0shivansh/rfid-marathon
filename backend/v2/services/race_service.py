@@ -7,7 +7,7 @@ This module handles race management operations.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 import uuid
 import re
 
@@ -25,10 +25,9 @@ from basefunctions import (
     iso8601_to_timestamp,
 )
 from constants import (
-    TABLE_RACES,
+    RaceCategory,
     RaceStatus,
     RACE_STATUS_TRANSITIONS,
-    ErrorMessages,
     RACE_MIN_DISTANCE_METERS,
     RACE_MAX_DISTANCE_METERS,
 )
@@ -51,15 +50,19 @@ class RaceService:
         created_by: str,
         copy_from_race_id: Optional[str] = None,
         description: Optional[str] = None,
-        age_upto30_excellent: Optional[float] = None,
-        age_upto30_good: Optional[float] = None,
-        age_upto30_satisfactory: Optional[float] = None,
-        age_upto40_excellent: Optional[float] = None,
-        age_upto40_good: Optional[float] = None,
-        age_upto40_satisfactory: Optional[float] = None,
-        age_40to45_excellent: Optional[float] = None,
-        age_40to45_good: Optional[float] = None,
-        age_40to45_satisfactory: Optional[float] = None
+        race_category: Optional[Union[str, RaceCategory]] = None,
+        bpet_age_upto30: Optional[List[float]] = None,
+        bpet_age_upto40: Optional[List[float]] = None,
+        bpet_age_40_45: Optional[List[float]] = None,
+        cpt_age_upto35: Optional[List[float]] = None,
+        cpt_age_35_45: Optional[List[float]] = None,
+        cpt_age_45_50: Optional[List[float]] = None,
+        cpt_age_50_55: Optional[List[float]] = None,
+        cpt_age_55_60: Optional[List[float]] = None,
+        ppt_age_upto30: Optional[List[float]] = None,
+        ppt_age_30_40: Optional[List[float]] = None,
+        ppt_age_40_45: Optional[List[float]] = None,
+        ppt_age_45_50: Optional[List[float]] = None
     ) -> Race:
         """
         Create a new race.
@@ -111,15 +114,23 @@ class RaceService:
                 status=RaceStatus.CREATED.value,
                 created_by=created_by,
                 table_name=table_name,
-                age_upto30_excellent=age_upto30_excellent,
-                age_upto30_good=age_upto30_good,
-                age_upto30_satisfactory=age_upto30_satisfactory,
-                age_upto40_excellent=age_upto40_excellent,
-                age_upto40_good=age_upto40_good,
-                age_upto40_satisfactory=age_upto40_satisfactory,
-                age_40to45_excellent=age_40to45_excellent,
-                age_40to45_good=age_40to45_good,
-                age_40to45_satisfactory=age_40to45_satisfactory
+                race_category=(
+                    race_category.value
+                    if isinstance(race_category, RaceCategory)
+                    else str(race_category or "BPET")
+                ),
+                bpet_age_upto30=bpet_age_upto30,
+                bpet_age_upto40=bpet_age_upto40,
+                bpet_age_40_45=bpet_age_40_45,
+                cpt_age_upto35=cpt_age_upto35,
+                cpt_age_35_45=cpt_age_35_45,
+                cpt_age_45_50=cpt_age_45_50,
+                cpt_age_50_55=cpt_age_50_55,
+                cpt_age_55_60=cpt_age_55_60,
+                ppt_age_upto30=ppt_age_upto30,
+                ppt_age_30_40=ppt_age_30_40,
+                ppt_age_40_45=ppt_age_40_45,
+                ppt_age_45_50=ppt_age_45_50
             )
 
             db.add(race)
@@ -196,7 +207,7 @@ class RaceService:
 
     def _create_per_race_participant_table(self, db: Session, table_name: str, race_id: str) -> None:
         """
-        Create a per-race participant table using the FiveKmRaceParticipants schema.
+        Create a per-race participant table using the PerRaceTable schema.
         
         Schema includes:
         - id (UUID, primary key)
@@ -414,8 +425,11 @@ class RaceService:
         # Update allowed fields
         allowed_fields = [
             'name', 'distance_meters', 'location',
-            'scheduled_date', 'description', 'status',
-            'up30start_time', 'upto40start_time', 'start_time_40_45', 'end_time'
+            'scheduled_date', 'description', 'status', 'race_category',
+            'bpet_age_upto30', 'bpet_age_upto40', 'bpet_age_40_45',
+            'cpt_age_upto35', 'cpt_age_35_45', 'cpt_age_45_50', 'cpt_age_50_55', 'cpt_age_55_60',
+            'ppt_age_upto30', 'ppt_age_30_40', 'ppt_age_40_45', 'ppt_age_45_50',
+            'bpet_start_time', 'cpt_start_time', 'ppt_start_time', 'end_time'
         ]
         
         for field, value in updates.items():

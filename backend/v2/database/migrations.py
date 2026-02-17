@@ -212,7 +212,7 @@ class MigrationManager:
 
     def ensure_race_timing_columns(self) -> Dict[str, Any]:
         """
-        Ensure races table includes age-based start times and end_time columns.
+        Ensure races table includes per-category start times and end_time columns.
         IDEMPOTENT and safe across all environments.
         """
         results: Dict[str, Any] = {"added_columns": [], "skipped": []}
@@ -220,48 +220,370 @@ class MigrationManager:
             if self.engine is None:
                 return {"success": False, "error": "No engine"}
             inspector = inspect(self.engine)
-            
+
             if not self.table_exists("races"):
                 logger.info("Races table does not exist, skipping timing columns")
                 return {"success": True, "skipped": True}
-            
+
             cols = [col['name'] for col in inspector.get_columns('races')] if inspector else []
-            
+
             with self.engine.connect() as conn:
-                if 'up30start_time' not in cols:
-                    conn.execute(text("ALTER TABLE races ADD COLUMN up30start_time TIMESTAMP WITH TIME ZONE NULL"))
-                    results["added_columns"].append("up30start_time")
-                    logger.info("✓ Added up30start_time column to races table")
+                if 'bpet_start_time' not in cols:
+                    conn.execute(text("ALTER TABLE races ADD COLUMN bpet_start_time JSONB NULL"))
+                    results["added_columns"].append("bpet_start_time")
+                    logger.info("✓ Added bpet_start_time column to races table")
                 else:
-                    results["skipped"].append("up30start_time")
+                    results["skipped"].append("bpet_start_time")
 
-                if 'upto40start_time' not in cols:
-                    conn.execute(text("ALTER TABLE races ADD COLUMN upto40start_time TIMESTAMP WITH TIME ZONE NULL"))
-                    results["added_columns"].append("upto40start_time")
-                    logger.info("✓ Added upto40start_time column to races table")
+                if 'cpt_start_time' not in cols:
+                    conn.execute(text("ALTER TABLE races ADD COLUMN cpt_start_time JSONB NULL"))
+                    results["added_columns"].append("cpt_start_time")
+                    logger.info("✓ Added cpt_start_time column to races table")
                 else:
-                    results["skipped"].append("upto40start_time")
+                    results["skipped"].append("cpt_start_time")
 
-                if '40_45start_time' not in cols:
-                    conn.execute(text("ALTER TABLE races ADD COLUMN \"40_45start_time\" TIMESTAMP WITH TIME ZONE NULL"))
-                    results["added_columns"].append("40_45start_time")
-                    logger.info("✓ Added 40_45start_time column to races table")
+                if 'ppt_start_time' not in cols:
+                    conn.execute(text("ALTER TABLE races ADD COLUMN ppt_start_time JSONB NULL"))
+                    results["added_columns"].append("ppt_start_time")
+                    logger.info("✓ Added ppt_start_time column to races table")
                 else:
-                    results["skipped"].append("40_45start_time")
-                
+                    results["skipped"].append("ppt_start_time")
+
+                legacy_cols = set(cols)
+                if {
+                    "bpet_up30start_time",
+                    "bpet_upto40start_time",
+                    "bpet_40_45start_time",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET bpet_start_time = jsonb_build_array(
+                            bpet_up30start_time,
+                            bpet_upto40start_time,
+                            bpet_40_45start_time
+                        )
+                        WHERE bpet_start_time IS NULL
+                    """))
+
+                if {
+                    "cpt_up35start_time",
+                    "35_45start_time",
+                    "45_50start_time",
+                    "50_55start_time",
+                    "55_60start_time",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET cpt_start_time = jsonb_build_array(
+                            cpt_up35start_time,
+                            "35_45start_time",
+                            "45_50start_time",
+                            "50_55start_time",
+                            "55_60start_time"
+                        )
+                        WHERE cpt_start_time IS NULL
+                    """))
+
                 if 'end_time' not in cols:
                     conn.execute(text("ALTER TABLE races ADD COLUMN end_time TIMESTAMP WITH TIME ZONE NULL"))
                     results["added_columns"].append("end_time")
                     logger.info("✓ Added end_time column to races table")
                 else:
                     results["skipped"].append("end_time")
-                
+
                 conn.commit()
-            
+
             results["success"] = True
             return results
         except Exception as e:
             logger.error(f"✗ Failed ensuring race timing columns: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            return results
+
+    def ensure_race_qualifying_columns(self) -> Dict[str, Any]:
+        """
+        Ensure races table includes JSONB qualifying time columns per category.
+        IDEMPOTENT and safe across all environments.
+        """
+        results: Dict[str, Any] = {"added_columns": [], "skipped": [], "errors": []}
+        try:
+            if self.engine is None:
+                return {"success": False, "error": "No engine"}
+            inspector = inspect(self.engine)
+
+            if not self.table_exists("races"):
+                logger.info("Races table does not exist, skipping qualifying columns")
+                return {"success": True, "skipped": True}
+
+            cols = [col['name'] for col in inspector.get_columns('races')] if inspector else []
+
+            column_defs = {
+                "bpet_age_upto30": "JSONB NOT NULL DEFAULT '[1500,1578,1620]'::jsonb",
+                "bpet_age_upto40": "JSONB NOT NULL DEFAULT '[1698,1800,1860]'::jsonb",
+                "bpet_age_40_45": "JSONB NOT NULL DEFAULT '[1878,1980,2100]'::jsonb",
+                "cpt_age_upto35": "JSONB NOT NULL DEFAULT '[840,900,960,1050]'::jsonb",
+                "cpt_age_35_45": "JSONB NOT NULL DEFAULT '[960,1020,1080,1200]'::jsonb",
+                "cpt_age_45_50": "JSONB NOT NULL DEFAULT '[1020,1080,1140,1230]'::jsonb",
+                "cpt_age_50_55": "JSONB NOT NULL DEFAULT '[1680,1800,1920,2040]'::jsonb",
+                "cpt_age_55_60": "JSONB NOT NULL DEFAULT '[1920,2040,2160,2280]'::jsonb",
+                "ppt_age_upto30": "JSONB NOT NULL DEFAULT '[540,570,600]'::jsonb",
+                "ppt_age_30_40": "JSONB NOT NULL DEFAULT '[630,660,690]'::jsonb",
+                "ppt_age_40_45": "JSONB NOT NULL DEFAULT '[690,720,750]'::jsonb",
+                "ppt_age_45_50": "JSONB NOT NULL DEFAULT '[780,840,900]'::jsonb",
+            }
+
+            with self.engine.connect() as conn:
+                for col_name, col_def in column_defs.items():
+                    if col_name not in cols:
+                        try:
+                            conn.execute(text(f"ALTER TABLE races ADD COLUMN {col_name} {col_def}"))
+                            results["added_columns"].append(col_name)
+                            logger.info(f"✓ Added {col_name} column to races table")
+                        except Exception as e:
+                            results["errors"].append({"column": col_name, "error": str(e)})
+                    else:
+                        results["skipped"].append(col_name)
+
+                legacy_cols = set(cols)
+                if {
+                    "bpet_age_upto30_excellent",
+                    "bpet_age_upto30_good",
+                    "bpet_age_upto30_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET bpet_age_upto30 = jsonb_build_array(
+                            bpet_age_upto30_excellent,
+                            bpet_age_upto30_good,
+                            bpet_age_upto30_satisfactory
+                        )
+                    """))
+
+                if {
+                    "bpet_age_upto40_excellent",
+                    "bpet_age_upto40_good",
+                    "bpet_age_upto40_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET bpet_age_upto40 = jsonb_build_array(
+                            bpet_age_upto40_excellent,
+                            bpet_age_upto40_good,
+                            bpet_age_upto40_satisfactory
+                        )
+                    """))
+
+                if {
+                    "bpet_age_40to45_excellent",
+                    "bpet_age_40to45_good",
+                    "bpet_age_40to45_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET bpet_age_40_45 = jsonb_build_array(
+                            bpet_age_40to45_excellent,
+                            bpet_age_40to45_good,
+                            bpet_age_40to45_satisfactory
+                        )
+                    """))
+
+                if {
+                    "cpt_age_upto35_superb",
+                    "cpt_age_upto35_excellent",
+                    "cpt_age_upto35_good",
+                    "cpt_age_upto35_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET cpt_age_upto35 = jsonb_build_array(
+                            cpt_age_upto35_superb,
+                            cpt_age_upto35_excellent,
+                            cpt_age_upto35_good,
+                            cpt_age_upto35_satisfactory
+                        )
+                    """))
+
+                if {
+                    "cpt_age_35to45_superb",
+                    "cpt_age_35to45_excellent",
+                    "cpt_age_35to45_good",
+                    "cpt_age_35to45_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET cpt_age_35_45 = jsonb_build_array(
+                            cpt_age_35to45_superb,
+                            cpt_age_35to45_excellent,
+                            cpt_age_35to45_good,
+                            cpt_age_35to45_satisfactory
+                        )
+                    """))
+
+                if {
+                    "cpt_age_45to50_superb",
+                    "cpt_age_45to50_excellent",
+                    "cpt_age_45to50_good",
+                    "cpt_age_45to50_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET cpt_age_45_50 = jsonb_build_array(
+                            cpt_age_45to50_superb,
+                            cpt_age_45to50_excellent,
+                            cpt_age_45to50_good,
+                            cpt_age_45to50_satisfactory
+                        )
+                    """))
+
+                if {
+                    "cpt_age_50to55_superb",
+                    "cpt_age_50to55_excellent",
+                    "cpt_age_50to55_good",
+                    "cpt_age_50to55_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET cpt_age_50_55 = jsonb_build_array(
+                            cpt_age_50to55_superb,
+                            cpt_age_50to55_excellent,
+                            cpt_age_50to55_good,
+                            cpt_age_50to55_satisfactory
+                        )
+                    """))
+
+                if {
+                    "cpt_age_55to60_superb",
+                    "cpt_age_55to60_excellent",
+                    "cpt_age_55to60_good",
+                    "cpt_age_55to60_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET cpt_age_55_60 = jsonb_build_array(
+                            cpt_age_55to60_superb,
+                            cpt_age_55to60_excellent,
+                            cpt_age_55to60_good,
+                            cpt_age_55to60_satisfactory
+                        )
+                    """))
+
+                if {
+                    "ppt_age_upto30_excellent",
+                    "ppt_age_upto30_good",
+                    "ppt_age_upto30_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET ppt_age_upto30 = jsonb_build_array(
+                            ppt_age_upto30_excellent,
+                            ppt_age_upto30_good,
+                            ppt_age_upto30_satisfactory
+                        )
+                    """))
+
+                if {
+                    "ppt_age_30to40_excellent",
+                    "ppt_age_30to40_good",
+                    "ppt_age_30to40_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET ppt_age_30_40 = jsonb_build_array(
+                            ppt_age_30to40_excellent,
+                            ppt_age_30to40_good,
+                            ppt_age_30to40_satisfactory
+                        )
+                    """))
+
+                if {
+                    "ppt_age_40to45_excellent",
+                    "ppt_age_40to45_good",
+                    "ppt_age_40to45_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET ppt_age_40_45 = jsonb_build_array(
+                            ppt_age_40to45_excellent,
+                            ppt_age_40to45_good,
+                            ppt_age_40to45_satisfactory
+                        )
+                    """))
+
+                if {
+                    "ppt_age_45to50_excellent",
+                    "ppt_age_45to50_good",
+                    "ppt_age_45to50_satisfactory",
+                }.issubset(legacy_cols):
+                    conn.execute(text("""
+                        UPDATE races
+                        SET ppt_age_45_50 = jsonb_build_array(
+                            ppt_age_45to50_excellent,
+                            ppt_age_45to50_good,
+                            ppt_age_45to50_satisfactory
+                        )
+                    """))
+                conn.commit()
+
+            results["success"] = True
+            return results
+        except Exception as e:
+            logger.error(f"✗ Failed ensuring race qualifying columns: {e}")
+            results["success"] = False
+            results["error"] = str(e)
+            return results
+
+    def ensure_race_qualifying_constraints(self) -> Dict[str, Any]:
+        """
+        Ensure races table includes list-length constraints for qualifying times and start times.
+        IDEMPOTENT and safe across all environments.
+        """
+        results: Dict[str, Any] = {"added_constraints": [], "skipped": [], "errors": []}
+        try:
+            if self.engine is None:
+                return {"success": False, "error": "No engine"}
+            inspector = inspect(self.engine)
+
+            if not self.table_exists("races"):
+                logger.info("Races table does not exist, skipping qualifying constraints")
+                return {"success": True, "skipped": True}
+
+            existing = [c.get("name") for c in (inspector.get_check_constraints("races") if inspector else [])]
+            constraints = {
+                "check_bpet_age_upto30_len": "CHECK (jsonb_typeof(bpet_age_upto30) = 'array' AND jsonb_array_length(bpet_age_upto30) = 3)",
+                "check_bpet_age_upto40_len": "CHECK (jsonb_typeof(bpet_age_upto40) = 'array' AND jsonb_array_length(bpet_age_upto40) = 3)",
+                "check_bpet_age_40_45_len": "CHECK (jsonb_typeof(bpet_age_40_45) = 'array' AND jsonb_array_length(bpet_age_40_45) = 3)",
+                "check_cpt_age_upto35_len": "CHECK (jsonb_typeof(cpt_age_upto35) = 'array' AND jsonb_array_length(cpt_age_upto35) = 4)",
+                "check_cpt_age_35_45_len": "CHECK (jsonb_typeof(cpt_age_35_45) = 'array' AND jsonb_array_length(cpt_age_35_45) = 4)",
+                "check_cpt_age_45_50_len": "CHECK (jsonb_typeof(cpt_age_45_50) = 'array' AND jsonb_array_length(cpt_age_45_50) = 4)",
+                "check_cpt_age_50_55_len": "CHECK (jsonb_typeof(cpt_age_50_55) = 'array' AND jsonb_array_length(cpt_age_50_55) = 4)",
+                "check_cpt_age_55_60_len": "CHECK (jsonb_typeof(cpt_age_55_60) = 'array' AND jsonb_array_length(cpt_age_55_60) = 4)",
+                "check_ppt_age_upto30_len": "CHECK (jsonb_typeof(ppt_age_upto30) = 'array' AND jsonb_array_length(ppt_age_upto30) = 3)",
+                "check_ppt_age_30_40_len": "CHECK (jsonb_typeof(ppt_age_30_40) = 'array' AND jsonb_array_length(ppt_age_30_40) = 3)",
+                "check_ppt_age_40_45_len": "CHECK (jsonb_typeof(ppt_age_40_45) = 'array' AND jsonb_array_length(ppt_age_40_45) = 3)",
+                "check_ppt_age_45_50_len": "CHECK (jsonb_typeof(ppt_age_45_50) = 'array' AND jsonb_array_length(ppt_age_45_50) = 3)",
+                "check_bpet_start_time_len": "CHECK (bpet_start_time IS NULL OR (jsonb_typeof(bpet_start_time) = 'array' AND jsonb_array_length(bpet_start_time) = 3))",
+                "check_cpt_start_time_len": "CHECK (cpt_start_time IS NULL OR (jsonb_typeof(cpt_start_time) = 'array' AND jsonb_array_length(cpt_start_time) = 5))",
+                "check_ppt_start_time_len": "CHECK (ppt_start_time IS NULL OR (jsonb_typeof(ppt_start_time) = 'array' AND jsonb_array_length(ppt_start_time) = 4))",
+            }
+
+            with self.engine.connect() as conn:
+                for name, clause in constraints.items():
+                    if name in existing:
+                        results["skipped"].append(name)
+                        continue
+                    try:
+                        conn.execute(text(f"ALTER TABLE races ADD CONSTRAINT {name} {clause}"))
+                        results["added_constraints"].append(name)
+                        logger.info(f"✓ Added constraint {name}")
+                    except Exception as e:
+                        results["errors"].append({"constraint": name, "error": str(e)})
+                conn.commit()
+
+            results["success"] = True
+            return results
+        except Exception as e:
+            logger.error(f"✗ Failed ensuring race qualifying constraints: {e}")
             results["success"] = False
             results["error"] = str(e)
             return results
@@ -598,6 +920,27 @@ class MigrationManager:
                     logger.info("✓ Added status column to races table")
                 else:
                     logger.info("✓ status column already exists in races table")
+
+                # Add race_category column if missing
+                if 'race_category' not in races_columns:
+                    logger.info("Adding 'race_category' column to races table...")
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD COLUMN race_category VARCHAR(50) DEFAULT 'BPET' NOT NULL;
+                    """))
+                    try:
+                        session.execute(text("""
+                            ALTER TABLE races
+                            ADD CONSTRAINT check_race_category
+                            CHECK (race_category IN ('BPET', 'CPT', 'PPT'));
+                        """))
+                    except Exception as e:
+                        logger.warning(f"Could not add race_category constraint (may already exist): {e}")
+                    session.commit()
+                    results["added_columns"].append("races.race_category")
+                    logger.info("✓ Added race_category column to races table")
+                else:
+                    logger.info("✓ race_category column already exists in races table")
             
             session.close()
             
@@ -754,51 +1097,59 @@ def run_migrations() -> Dict[str, Any]:
     
     try:
         # Step 1: Create tables
-        logger.info("\n[1/13] Creating database tables...")
+        logger.info("\n[1/15] Creating database tables...")
         results["tables"] = migration_manager.create_tables()
         
         # Step 2: Add missing columns
-        logger.info("\n[2/13] Adding missing columns...")
+        logger.info("\n[2/15] Adding missing columns...")
         results["columns"] = migration_manager.add_missing_columns()
         
         # Step 3: Update constraints
-        logger.info("\n[3/13] Updating database constraints...")
+        logger.info("\n[3/15] Updating database constraints...")
         results["constraints"] = migration_manager.update_race_distance_constraint()
         # Step 4: Update race status constraint to include all valid statuses
-        logger.info("\n[4/13] Updating race status constraint...")
+        logger.info("\n[4/15] Updating race status constraint...")
         results["status_constraint"] = migration_manager.update_race_status_constraint()
         
         # Step 5: Create custom indexes
-        logger.info("\n[5/13] Creating custom indexes...")
+        logger.info("\n[5/15] Creating custom indexes...")
         migration_manager.create_indexes()
         results["indexes"] = {"success": True}
         
         # Step 6: Add start/end columns to per-race participant tables
-        logger.info("\n[6/13] Ensuring per-race participant tables have start/end times...")
+        logger.info("\n[6/15] Ensuring per-race participant tables have start/end times...")
         results["participant_time_columns"] = migration_manager.ensure_participant_time_columns()
         
         # Step 7: Add status column to per-race participant tables
-        logger.info("\n[7/13] Ensuring per-race participant tables have status column...")
+        logger.info("\n[7/15] Ensuring per-race participant tables have status column...")
         results["participant_status_column"] = migration_manager.ensure_participant_status_column()
         
         # Step 8: Enforce gender NOT NULL in participant tables
-        logger.info("\n[8/13] Enforcing gender NOT NULL in participant tables...")
+        logger.info("\n[8/15] Enforcing gender NOT NULL in participant tables...")
         results["participant_gender_not_null"] = migration_manager.ensure_participant_gender_not_null()
         
         # Step 9: Add bulk upload columns to per-race participant tables
-        logger.info("\n[9/13] Ensuring per-race participant tables have bulk upload columns...")
+        logger.info("\n[9/15] Ensuring per-race participant tables have bulk upload columns...")
         results["participant_bulk_columns"] = migration_manager.ensure_participant_bulk_columns()
 
         # Step 10: Enforce unique army_number per race
-        logger.info("\n[10/13] Enforcing unique army_number per race...")
+        logger.info("\n[10/15] Enforcing unique army_number per race...")
         results["participant_army_number_unique"] = migration_manager.ensure_participant_army_number_unique()
 
-        # Step 11: Add race timing columns (age-based start times, end_time)
-        logger.info("\n[11/13] Adding race timing columns (age-based start times, end_time)...")
+        # Step 11: Add race qualifying columns (JSONB lists)
+        logger.info("\n[11/15] Adding race qualifying columns (JSONB lists)...")
+        results["race_qualifying_columns"] = migration_manager.ensure_race_qualifying_columns()
+
+        # Step 12: Add race timing columns (start time lists, end_time)
+        logger.info("\n[12/15] Adding race timing columns (start time lists, end_time)...")
         results["race_timing_columns"] = migration_manager.ensure_race_timing_columns()
+
+        # Step 13: Add qualifying list constraints
+        logger.info("\n[13/15] Adding qualifying list constraints...")
+        results["race_qualifying_constraints"] = migration_manager.ensure_race_qualifying_constraints()
         
-        # Step 12: Verify schema
-        logger.info("\n[12/13] Verifying database schema...")
+        # Step 14: Verify schema
+        logger.info("\n[14/15] Verifying database schema...")
         results["verification"] = migration_manager.verify_schema()
         
         if not results["verification"]["success"]:
@@ -807,8 +1158,8 @@ def run_migrations() -> Dict[str, Any]:
                 details=results["verification"]
             )
         
-        # Step 13: Seed default data
-        logger.info("\n[13/13] Seeding default data...")
+        # Step 15: Seed default data
+        logger.info("\n[15/15] Seeding default data...")
         migration_manager.seed_default_data()
         results["seeding"] = {"success": True}
         

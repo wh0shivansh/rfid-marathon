@@ -130,7 +130,7 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
 /**
  * Modal dialog for selecting race start time
  */
-export function renderRaceStartTimeModal(scheduledDateIso) {
+export function renderRaceStartTimeModal(scheduledDateIso, ageGroups = []) {
   // Set default time to now, but formatted nicely for the input
   const now = new Date();
   const timeStr = now.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
@@ -144,39 +144,24 @@ export function renderRaceStartTimeModal(scheduledDateIso) {
 
   return `
     <div id="race-start-time-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;">
-      <div style="background: #0f172a; border: 2px solid #334155; border-radius: 8px; padding: 24px; max-width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+      <div style="background: #0f172a; border: 2px solid #334155; border-radius: 8px; padding: 24px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
         <h2 style="color: #e2e8f0; margin: 0 0 16px 0; font-size: 18px;">Select Age Group Start Times</h2>
         <p style="color: #a78bfa; font-size: 12px; margin: 0 0 8px 0;">Set start times for each age category.</p>
         <div style="color: #cbd5e1; font-size: 12px; margin: 0 0 16px 0;">Date: ${dateDisplay}</div>
 
-        <div style="display: grid; gap: 12px; margin-bottom: 20px;">
-          <div>
-            <label for="race-start-time-up30" style="color: #cbd5e1; font-size: 12px; display: block; margin-bottom: 4px;">Start Time (&lt;30)</label>
-            <input 
-              type="time" 
-              id="race-start-time-up30" 
-              value="${timeStr}"
-              style="width: 100%; padding: 12px; background: #1e293b; border: 2px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 14px; box-sizing: border-box;"
-            />
-          </div>
-          <div>
-            <label for="race-start-time-upto40" style="color: #cbd5e1; font-size: 12px; display: block; margin-bottom: 4px;">Start Time (30-40)</label>
-            <input 
-              type="time" 
-              id="race-start-time-upto40" 
-              value="${timeStr}"
-              style="width: 100%; padding: 12px; background: #1e293b; border: 2px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 14px; box-sizing: border-box;"
-            />
-          </div>
-          <div>
-            <label for="race-start-time-40-45" style="color: #cbd5e1; font-size: 12px; display: block; margin-bottom: 4px;">Start Time (40-45)</label>
-            <input 
-              type="time" 
-              id="race-start-time-40-45" 
-              value="${timeStr}"
-              style="width: 100%; padding: 12px; background: #1e293b; border: 2px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 14px; box-sizing: border-box;"
-            />
-          </div>
+        <div style="display: grid; grid-template-columns: repeat(${ageGroups.length}, 1fr); gap: 12px; margin-bottom: 20px; min-width: min-content;">
+          ${ageGroups.map((group, index) => `
+            <div>
+              <label for="race-start-time-${index}" style="color: #cbd5e1; font-size: 12px; display: block; margin-bottom: 4px; text-align: center;">${group.label}</label>
+              <input 
+                type="time" 
+                id="race-start-time-${index}" 
+                data-start-time-index="${index}"
+                value="${timeStr}"
+                style="width: 100%; padding: 12px; background: #1e293b; border: 2px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 14px; box-sizing: border-box;"
+              />
+            </div>
+          `).join('')}
         </div>
 
         <div style="display: flex; gap: 8px; justify-content: flex-end;">

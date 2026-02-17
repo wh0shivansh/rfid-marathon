@@ -68,7 +68,6 @@ DB_CONNECTION_TIMEOUT_SECONDS: Final[int] = 10
 # TABLE NAMES
 # ============================================================================
 
-TABLE_RACES: Final[str] = "races"
 TABLE_ENCRYPTION_KEYS: Final[str] = "encryption_keys"
 
 # ============================================================================
@@ -134,6 +133,38 @@ class RaceStatus(str, Enum):
     CREATED = "created"           # Race created, not started
     STARTED = "started"           # Race started by admin, participants are running
     COMPLETED = "completed"       # Race completed, all participants finished
+
+
+class RaceCategory(str, Enum):
+    """Enumeration of race categories"""
+    BPET = "BPET"
+    CPT = "CPT"
+    PPT = "PPT"
+
+
+RACE_CATEGORY_CONFIG = {
+    "BPET": {
+        "age_max": [30, 40, 45],
+        "qualifying_keys": ["bpet_age_upto30", "bpet_age_upto40", "bpet_age_40_45"],
+        "start_times_key": "bpet_start_time",
+    },
+    "CPT": {
+        "age_max": [35, 45, 50, 55, 60],
+        "qualifying_keys": [
+            "cpt_age_upto35",
+            "cpt_age_35_45",
+            "cpt_age_45_50",
+            "cpt_age_50_55",
+            "cpt_age_55_60",
+        ],
+        "start_times_key": "cpt_start_time",
+    },
+    "PPT": {
+        "age_max": [30, 40, 45, 50],
+        "qualifying_keys": ["ppt_age_upto30", "ppt_age_30_40", "ppt_age_40_45", "ppt_age_45_50"],
+        "start_times_key": "ppt_start_time",
+    },
+}
 
 # Race Status Transition Map
 # Defines allowed transitions between race statuses
