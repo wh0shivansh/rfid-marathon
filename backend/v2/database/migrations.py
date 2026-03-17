@@ -54,10 +54,11 @@ class MigrationManager:
             inspector = inspect(self.engine)
             # Fetch all races to know participant table names
             with self.engine.connect() as conn:
-                race_rows = conn.execute(text("SELECT id, table_name FROM races")).fetchall()
+                race_rows = conn.execute(text("SELECT id, table_name, rfid_placement_mode FROM races")).fetchall()
                 for row in race_rows:
                     race_id = row.id if hasattr(row, "id") else row[0]
                     table_name = row.table_name if hasattr(row, "table_name") else row[1]
+                    race_mode = row.rfid_placement_mode if hasattr(row, "rfid_placement_mode") else (row[2] if len(row) > 2 else None)
                     if not table_name:
                         results["skipped_tables"].append({"race_id": str(race_id), "reason": "no table_name"})
                         continue
@@ -103,10 +104,11 @@ class MigrationManager:
             inspector = inspect(self.engine)
             # Fetch all races to know participant table names
             with self.engine.connect() as conn:
-                race_rows = conn.execute(text("SELECT id, table_name FROM races")).fetchall()
+                race_rows = conn.execute(text("SELECT id, table_name, rfid_placement_mode FROM races")).fetchall()
                 for row in race_rows:
                     race_id = row.id if hasattr(row, "id") else row[0]
                     table_name = row.table_name if hasattr(row, "table_name") else row[1]
+                    race_mode = row.rfid_placement_mode if hasattr(row, "rfid_placement_mode") else (row[2] if len(row) > 2 else None)
                     if not table_name:
                         results["skipped_tables"].append({"race_id": str(race_id), "reason": "no table_name"})
                         continue
@@ -125,14 +127,14 @@ class MigrationManager:
                             update_sql = f"""
                                 UPDATE "{table_name}"
                                 SET status = CASE
-                                    WHEN end_time IS NOT NULL AND mid_time IS NULL THEN 'fail'
+                                    WHEN end_time IS NOT NULL AND mid_time IS NULL AND :race_mode != 'end_intersection' THEN 'fail'
                                     WHEN end_time IS NOT NULL THEN 'completed'
                                     WHEN start_time IS NOT NULL THEN 'running'
                                     ELSE 'registered'
                                 END
                                 WHERE status = 'registered'
                             """
-                            conn.execute(text(update_sql))
+                            conn.execute(text(update_sql), {"race_mode": str(race_mode or "mid_end_reader_diff")})
                             results["updated_tables"].append(table_name)
                         except Exception as e:
                             results["errors"].append({"table": table_name, "error": str(e)})
@@ -150,8 +152,11 @@ class MigrationManager:
                             conn.execute(text(f"""
                                 UPDATE "{table_name}"
                                 SET status = 'fail'
-                                WHERE end_time IS NOT NULL AND mid_time IS NULL AND status != 'fail'
-                            """))
+                                WHERE end_time IS NOT NULL
+                                  AND mid_time IS NULL
+                                  AND status != 'fail'
+                                  AND :race_mode != 'end_intersection'
+                            """), {"race_mode": str(race_mode or "mid_end_reader_diff")})
 
                             # Normalize invalid/null statuses
                             conn.execute(text(f"""
@@ -941,6 +946,34 @@ class MigrationManager:
                     logger.info("✓ Added race_category column to races table")
                 else:
                     logger.info("✓ race_category column already exists in races table")
+
+                # Add rfid_placement_mode column if missing
+                if 'rfid_placement_mode' not in races_columns:
+                    logger.info("Adding 'rfid_placement_mode' column to races table...")
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD COLUMN rfid_placement_mode VARCHAR(50) DEFAULT 'mid_end_reader_diff' NOT NULL;
+                    """))
+                    session.commit()
+                    results["added_columns"].append("races.rfid_placement_mode")
+                    logger.info("✓ Added rfid_placement_mode column to races table")
+                else:
+                    logger.info("✓ rfid_placement_mode column already exists in races table")
+
+                # Ensure mode constraint exists and supports all values
+                try:
+                    session.execute(text("""
+                        ALTER TABLE races
+                        DROP CONSTRAINT IF EXISTS check_race_rfid_placement_mode;
+                    """))
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD CONSTRAINT check_race_rfid_placement_mode
+                        CHECK (rfid_placement_mode IN ('mid_end_reader_diff', 'end_intersection'));
+                    """))
+                    session.commit()
+                except Exception as e:
+                    logger.warning(f"Could not update rfid_placement_mode constraint: {e}")
             
             session.close()
             

@@ -3,7 +3,7 @@ export function renderDashboard(races = [], registrations = 0, totalParticipants
     { label: "Races", value: races.length || "--" },
     { label: "Total Participants", value: totalParticipants || "--" },
     { label: "Today Registrations", value: registrations || "--" },
-    { label: "Started Today", value: startedToday || "--" },
+    // { label: "Started Today", value: startedToday || "--" },
     { label: "Finished Today", value: finishedToday || "--" },
   ];
 

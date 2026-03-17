@@ -142,6 +142,12 @@ class RaceCategory(str, Enum):
     PPT = "PPT"
 
 
+class RaceRFIDMode(str, Enum):
+    """RFID sensor placement and evaluation mode for a race."""
+    MID_END_READER_DIFF = "mid_end_reader_diff"
+    END_INTERSECTION = "end_intersection"
+
+
 RACE_CATEGORY_CONFIG = {
     "BPET": {
         "age_max": [30, 40, 45],
@@ -340,7 +346,7 @@ PATTERN_ALPHANUMERIC = r"^[a-zA-Z0-9]+$"
 # ============================================================================
 
 SYSTEM_NAME: Final[str] = "RFID Marathon Management System"
-SYSTEM_VERSION: Final[str] = "2.0.0-alpha"
+SYSTEM_VERSION: Final[str] = "2.0.0"
 SYSTEM_ENV: Final[str] = "production"  # Default to production for safety
 SECURITY_LEVEL: Final[str] = "military-grade"
 

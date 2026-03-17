@@ -151,22 +151,28 @@ contextBridge.exposeInMainWorld("secureApi", {
         TableRow,
         TableCell,
         TextRun,
-        WidthType
+        WidthType,
+        VerticalAlign,
+        TableLayoutType,
+        PageOrientation
       } = docx;
 
       const colWeights = [5, 12, 10, 20, 6, 12, 12, 12, 9];
       const totalWeight = colWeights.reduce((a, b) => a + b, 0);
       const fontSize = 20;
       const cellMargin = 100;
+      const tableWidthTwips = 15840;
 
-      // Helper to create cells with padding (margins are in twips for docx)
+      // Helper to create cells with padding and word wrap (margins are in twips for docx)
       const makeCell = (text, bold = false, colIndex = 0) => {
         const weight = colWeights[colIndex] || 10;
         return new TableCell({
-          width: { size: (weight / totalWeight) * 100, type: WidthType.PERCENTAGE },
+          width: { size: Math.round((weight / totalWeight) * tableWidthTwips), type: WidthType.DXA },
           margins: { top: cellMargin, bottom: cellMargin, left: cellMargin, right: cellMargin },
+          vAlign: VerticalAlign.CENTER,
           children: [
         new Paragraph({
+          wordWrap: true,
           children: [new TextRun({ text: String(text ?? ''), bold, size: fontSize })]
         })
           ]
@@ -184,6 +190,7 @@ contextBridge.exposeInMainWorld("secureApi", {
 
       const table = new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
+        layout: TableLayoutType.FIXED,
         rows: [headerRow, ...dataRows]
       },);
 
@@ -192,6 +199,9 @@ contextBridge.exposeInMainWorld("secureApi", {
           {
             properties: {
               page: {
+                size: {
+                  orientation: PageOrientation.LANDSCAPE
+                },
                 margin: {
                   top: 1024,
                   right: 1024,
@@ -226,10 +236,10 @@ contextBridge.exposeInMainWorld("secureApi", {
       const margin = 24;
       const fontSize = 10;
       const lineHeight = 12;
-      const rowHeight = lineHeight + 6;
+      const baseRowHeight = lineHeight + 6;
 
-      const portraitSize = [595.28, 841.89];
-      const newPage = () => doc.addPage(portraitSize);
+      const landscapeSize = [841.89, 595.28];
+      const newPage = () => doc.addPage(landscapeSize);
       let page = newPage();
       let { width, height } = page.getSize();
       let y = height - margin;
@@ -239,15 +249,69 @@ contextBridge.exposeInMainWorld("secureApi", {
       const availableWidth = width - margin * 2;
       const colWidths = colWeights.map(w => (availableWidth * w) / totalWeight);
 
-      const drawRow = (cells, isHeader = false) => {
-        let x = margin;
+      const splitLongWord = (word, maxWidth) => {
+        if (!word) return [''];
+        const parts = [];
+        let current = '';
+
+        for (const char of word) {
+          const next = current + char;
+          if (font.widthOfTextAtSize(next, fontSize) <= maxWidth || !current) {
+            current = next;
+          } else {
+            parts.push(current);
+            current = char;
+          }
+        }
+
+        if (current) parts.push(current);
+        return parts;
+      };
+
+      // Helper to wrap text based on measured column width
+      const wrapText = (text, colIndex) => {
+        const cellWidth = (colWidths[colIndex] || 60) - 6;
+        const value = String(text ?? '');
+        if (!value) return [''];
+
+        const words = value.split(/\s+/);
+        const lines = [];
+        let currentLine = '';
+
+        words.forEach(word => {
+          const segments = splitLongWord(word, cellWidth);
+          segments.forEach(segment => {
+            const candidate = currentLine ? `${currentLine} ${segment}` : segment;
+            if (font.widthOfTextAtSize(candidate, fontSize) <= cellWidth) {
+              currentLine = candidate;
+              return;
+            }
+
+            if (currentLine) lines.push(currentLine);
+            currentLine = segment;
+          });
+        });
+        if (currentLine) lines.push(currentLine);
+        return lines.length > 0 ? lines : [''];
+      };
+
+      const getRowMetrics = (cells) => {
+        const wrappedCells = cells.map((cell, idx) => wrapText(cell, idx));
+        const maxLines = Math.max(...wrappedCells.map(lines => lines.length), 1);
+        return {
+          wrappedCells,
+          rowHeight: baseRowHeight + (maxLines - 1) * lineHeight
+        };
+      };
+
+      const drawRow = (cells, isHeader = false, metrics = null) => {
         const useFont = isHeader ? fontBold : font;
         const color = rgb(0, 0, 0);
+        const { wrappedCells, rowHeight } = metrics || getRowMetrics(cells);
         const rowBottom = y - rowHeight;
-        const textY = rowBottom + (rowHeight - fontSize) / 2;
 
-        cells.forEach((cell, idx) => {
-          const text = String(cell ?? '');
+        let x = margin;
+        wrappedCells.forEach((lines, idx) => {
           const cellWidth = colWidths[idx] || 60;
 
           page.drawRectangle({
@@ -259,12 +323,17 @@ contextBridge.exposeInMainWorld("secureApi", {
             borderWidth: 0.5
           });
 
-          page.drawText(text, {
-            x: x + 3,
-            y: textY,
-            size: fontSize,
-            font: useFont,
-            color
+          const contentHeight = lines.length * lineHeight;
+          let lineY = rowBottom + (rowHeight + contentHeight) / 2 - lineHeight + 1;
+          lines.forEach(line => {
+            page.drawText(line, {
+              x: x + 3,
+              y: lineY,
+              size: fontSize,
+              font: useFont,
+              color
+            });
+            lineY -= lineHeight;
           });
 
           x += cellWidth;
@@ -272,28 +341,32 @@ contextBridge.exposeInMainWorld("secureApi", {
         y = rowBottom;
       };
 
+      const ensureSpace = (requiredHeight, repeatHeader = false) => {
+        if (y >= margin + requiredHeight) return;
+        page = newPage();
+        ({ width, height } = page.getSize());
+        y = height - margin;
+        if (repeatHeader) {
+          const headerMetrics = getRowMetrics(headers);
+          drawRow(headers, true, headerMetrics);
+        }
+      };
+
       page.drawText(title, { x: margin, y, size: 12, font: fontBold, color: rgb(0, 0, 0) });
-      y -= rowHeight + 6;
+      y -= baseRowHeight + 6;
 
       const writeHeader = () => {
-        if (y < margin + rowHeight) {
-          page = newPage();
-          ({ width, height } = page.getSize());
-          y = height - margin;
-        }
-        drawRow(headers, true);
+        const headerMetrics = getRowMetrics(headers);
+        ensureSpace(headerMetrics.rowHeight);
+        drawRow(headers, true, headerMetrics);
       };
 
       writeHeader();
 
       rows.forEach((row) => {
-        if (y < margin + rowHeight) {
-          page = newPage();
-          ({ width, height } = page.getSize());
-          y = height - margin;
-          writeHeader();
-        }
-        drawRow(row, false);
+        const rowMetrics = getRowMetrics(row);
+        ensureSpace(rowMetrics.rowHeight, true);
+        drawRow(row, false, rowMetrics);
       });
 
       return await doc.save();

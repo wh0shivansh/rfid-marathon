@@ -17,12 +17,19 @@ export function areScoreboardFiltersActive() {
 export function getScoreboardExportRows() {
   const table = document.getElementById('scoreboard-table');
   if (!table) return null;
+  const headerCells = Array.from(table.querySelectorAll('thead th'));
+  const hasMidColumn = headerCells.some((th) => String(th.textContent || '').toLowerCase().includes('mid time'));
   const rows = Array.from(table.querySelectorAll('tbody tr'));
   return rows.map((row, index) => {
     const cells = row.querySelectorAll('td');
-    if (!cells || cells.length < 10) return null;
+    if (!cells || cells.length < 9) return null;
 
     const clean = (val) => String(val || '').replace(/\s+/g, ' ').trim();
+
+    const startIdx = 5;
+    const midIdx = hasMidColumn ? 6 : -1;
+    const endIdx = hasMidColumn ? 7 : 6;
+    const resultIdx = hasMidColumn ? 9 : 8;
 
     return {
       sno: String(index + 1),
@@ -30,17 +37,18 @@ export function getScoreboardExportRows() {
       rank: clean(cells[2].textContent),
       name: clean(cells[3].textContent),
       age: clean(cells[4].textContent),
-      start: clean(cells[5].textContent),
-      mid: clean(cells[6].textContent),
-      end: clean(cells[7].textContent),
-      result: clean(cells[9].textContent)
+      start: clean(cells[startIdx]?.textContent),
+      mid: hasMidColumn ? clean(cells[midIdx]?.textContent) : '',
+      end: clean(cells[endIdx]?.textContent),
+      result: clean(cells[resultIdx]?.textContent)
     };
   }).filter(Boolean);
 }
 
-export function buildScoreboardExportHtml(rows, title) {
+export function buildScoreboardExportHtml(rows, title, includeMid = true) {
   const safeTitle = title || 'Scoreboard Export';
   const bodyRows = rows.map(r => {
+    const midCell = includeMid ? `<td>${r.mid}</td>` : '';
     return `
       <tr>
         <td>${r.sno}</td>
@@ -49,7 +57,7 @@ export function buildScoreboardExportHtml(rows, title) {
         <td>${r.name}</td>
         <td>${r.age}</td>
         <td>${r.start}</td>
-        <td>${r.mid}</td>
+        ${midCell}
         <td>${r.end}</td>
         <td>${r.result}</td>
       </tr>
@@ -81,7 +89,7 @@ export function buildScoreboardExportHtml(rows, title) {
               <th>Name</th>
               <th>Age</th>
               <th>Start Time</th>
-              <th>Mid Time</th>
+              ${includeMid ? '<th>Mid Time</th>' : ''}
               <th>End Time</th>
               <th>Result</th>
             </tr>
@@ -117,6 +125,7 @@ export async function exportScoreboardResults() {
   const formatSelect = document.getElementById('scoreboard-export-format');
   const format = formatSelect ? formatSelect.value : 'excel';
   const race = state.races.find(r => String(r.id) === String(scoreboardSelectedRaceId));
+  const includeMid = race?.rfid_placement_mode !== 'end_intersection';
   const baseTitle = race ? `Scoreboard - ${race.name}` : 'Scoreboard';
   const baseName = race ? `scoreboard_${race.name.replace(/\s+/g, '_').toLowerCase()}` : 'scoreboard';
   const sanitizePart = (val) => String(val || '')
@@ -157,10 +166,15 @@ export async function exportScoreboardResults() {
       showToast('Excel export is unavailable (XLSX not loaded)', 'error');
       return;
     }
-    const header = ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result'];
+    const header = includeMid
+      ? ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result']
+      : ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'End Time', 'Result'];
     const aoa = [
       header,
-      ...rows.map(r => [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result])
+      ...rows.map(r => includeMid
+        ? [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result]
+        : [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.end, r.result]
+      )
     ];
     const xlsxArray = buildXlsx(aoa, 'Scoreboard');
     if (!xlsxArray) {
@@ -176,8 +190,13 @@ export async function exportScoreboardResults() {
       showToast('Word export is unavailable (DOCX not loaded)', 'error');
       return;
     }
-    const headers = ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result'];
-    const dataRows = rows.map(r => [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result]);
+    const headers = includeMid
+      ? ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result']
+      : ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'End Time', 'Result'];
+    const dataRows = rows.map(r => includeMid
+      ? [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result]
+      : [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.end, r.result]
+    );
     const docxArray = await buildDocx(headers, dataRows, exportTitle);
     if (!docxArray) {
       showToast('Word export failed', 'error');
@@ -192,8 +211,13 @@ export async function exportScoreboardResults() {
       showToast('PDF export is unavailable (PDF library not loaded)', 'error');
       return;
     }
-    const headers = ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result'];
-    const dataRows = rows.map(r => [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result]);
+    const headers = includeMid
+      ? ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'Mid Time', 'End Time', 'Result']
+      : ['S.No.', 'Army Number', 'Rank', 'Name', 'Age', 'Start Time', 'End Time', 'Result'];
+    const dataRows = rows.map(r => includeMid
+      ? [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.mid, r.end, r.result]
+      : [r.sno, r.army_number, r.rank, r.name, r.age, r.start, r.end, r.result]
+    );
     const pdfArray = await buildPdf(headers, dataRows, exportTitle);
     if (!pdfArray) {
       showToast('PDF export failed', 'error');

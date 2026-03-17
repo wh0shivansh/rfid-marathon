@@ -24,7 +24,8 @@ export async function updateCandidate(candidateId, updates) {
     }, 500);
   } catch (err) {
     console.error(err);
-    showToast(`Failed to update candidate: ${err.message}`, 'error');
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Failed to update candidate${codeTag}: ${err.message}`, 'error');
     throw err;
   }
 }
@@ -52,7 +53,8 @@ export async function deleteCandidate(candidateId) {
     }, 500);
   } catch (err) {
     console.error(err);
-    showToast(`Failed to delete candidate: ${err.message}`, 'error');
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Failed to delete candidate${codeTag}: ${err.message}`, 'error');
     throw err;
   }
 }

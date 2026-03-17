@@ -13,6 +13,12 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
   // Find selected race to determine button state
   const selectedRace = races.find(r => r.id === selectedRaceId);
   const raceStatus = selectedRace?.status || 'created';
+  const raceMode = selectedRace?.rfid_placement_mode || 'end_intersection';
+  const usesMidPoint = raceMode !== 'end_intersection';
+  const canEditMode = raceStatus === 'created';
+  const modeLabel = raceMode === 'end_intersection'
+    ? 'Dual End antennas (intersection, no mid check)'
+    : 'Mid + End readers (reader differentiation)';
   
   // Determine button text and state
   let buttonText = 'Start Race';
@@ -50,15 +56,17 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
       ${selectedRaceId ? `
       <div class="panel" style="margin-top: 24px;">
         <div class="panel-header">Race Statistics</div>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 16px;">
+        <div style="display: grid; grid-template-columns: repeat(${usesMidPoint ? 3 : 2}, 1fr); gap: 16px; padding: 16px;">
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #a78bfa; font-size: 12px; text-transform: uppercase;">Registered</div>
             <div id="stat-registered" style="color: #a78bfa; font-size: 24px; font-weight: bold;">0</div>
           </div>
+          ${usesMidPoint ? `
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
-            <div style="color: #fbbf24; font-size: 12px; text-transform: uppercase;">Mid Point</div>
+            <div id="stat-mid-label" style="color: #fbbf24; font-size: 12px; text-transform: uppercase;">Mid Point</div>
             <div id="stat-mid" style="color: #fbbf24; font-size: 24px; font-weight: bold;">0</div>
           </div>
+          ` : ``}
           <div style="background: #1e293b; padding: 12px; border-radius: 4px;">
             <div style="color: #34d399; font-size: 12px; text-transform: uppercase;">Completed</div>
             <div id="stat-completed" style="color: #34d399; font-size: 24px; font-weight: bold;">0</div>
@@ -85,6 +93,14 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
               <div>
                 <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Race Details</div>
                 <div id="race-info" style="color: #cbd5e1; font-size: 14px;">Select a race to view details</div>
+              </div>
+              <div>
+                <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">RFID Mode</div>
+                <div style="display: flex; align-items: center; gap: 8px; color: #cbd5e1; font-size: 14px;">
+                  <span id="race-mode-label">${selectedRaceId ? modeLabel : 'Select a race'}</span>
+                  ${selectedRaceId ? `<button type="button" id="edit-race-mode-btn" title="Edit mode" ${canEditMode ? '' : 'disabled'} style="border: 1px solid #334155; background: #1e293b; color: ${canEditMode ? '#93c5fd' : '#64748b'}; border-radius: 4px; width: 28px; height: 28px; cursor: ${canEditMode ? 'pointer' : 'not-allowed'};">✎</button>` : ''}
+                </div>
+                ${selectedRaceId && !canEditMode ? '<div style="margin-top: 4px; color: #64748b; font-size: 12px;">Mode editing is disabled after race start.</div>' : ''}
               </div>
               <div id="duration-container" style="display: none;">
                 <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Duration</div>

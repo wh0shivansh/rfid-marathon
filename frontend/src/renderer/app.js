@@ -290,6 +290,54 @@ function isTokenValid() {
   return state.auth.token && state.auth.expiresAt > Date.now() + 30000;
 }
 
+function formatValidationErrors(errors) {
+  if (!Array.isArray(errors) || errors.length === 0) return "Invalid request payload";
+  return errors
+    .map((item) => {
+      const field = Array.isArray(item?.loc) ? item.loc.join(".") : "payload";
+      const msg = item?.msg || "Invalid value";
+      return `${field}: ${msg}`;
+    })
+    .join("; ");
+}
+
+function extractBackendError(data, status) {
+  if (!data || typeof data !== "object") {
+    return {
+      message: `Request failed (${status})`,
+      error_code: null,
+      details: {},
+    };
+  }
+
+  if (data.success === false) {
+    const backendDetails = data.details || {};
+    const backendValidationErrors = Array.isArray(backendDetails.errors) ? backendDetails.errors : null;
+    return {
+      message: backendValidationErrors
+        ? formatValidationErrors(backendValidationErrors)
+        : (data.message || `Request failed (${status})`),
+      error_code: data.error_code || null,
+      details: backendDetails,
+    };
+  }
+
+  const rawDetail = data.detail;
+  if (Array.isArray(rawDetail) && rawDetail.length > 0) {
+    return {
+      message: formatValidationErrors(rawDetail),
+      error_code: "VALIDATION_ERROR",
+      details: { errors: rawDetail },
+    };
+  }
+
+  return {
+    message: data.message || `Request failed (${status})`,
+    error_code: data.error_code || null,
+    details: data.details || {},
+  };
+}
+
 async function apiRequest(path, options = {}) {
   const { method = "GET", body = null, auth = true } = options;
   const headers = { "Content-Type": "application/json" };
@@ -303,7 +351,11 @@ async function apiRequest(path, options = {}) {
 
   const data = await response.json().catch(() => ({ success: false, message: "Bad JSON" }));
   if (!response.ok || !data.success) {
-    throw new Error(data.message || `Request failed (${response.status})`);
+    const parsedError = extractBackendError(data, response.status);
+    const err = new Error(parsedError.message);
+    err.error_code = parsedError.error_code;
+    err.details = parsedError.details;
+    throw err;
   }
   return data.data;
 }
@@ -320,7 +372,11 @@ async function apiUpload(path, formData, auth = true) {
 
   const data = await response.json().catch(() => ({ success: false, message: "Bad JSON" }));
   if (!response.ok || !data.success) {
-    throw new Error(data.message || `Request failed (${response.status})`);
+    const parsedError = extractBackendError(data, response.status);
+    const err = new Error(parsedError.message);
+    err.error_code = parsedError.error_code;
+    err.details = parsedError.details;
+    throw err;
   }
   return data.data;
 }

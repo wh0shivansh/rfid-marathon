@@ -20,16 +20,18 @@ export function renderQualifyingTimesGrid(category) {
   tableHtml += '<tr>';
   tableHtml += '<th style="padding: 8px 4px; border-bottom: 2px solid #334155; text-align: center; color: #cbd5e1; font-weight: bold;">AGE</th>';
   config.ageGroups.forEach(group => {
-    tableHtml += `<th colspan="${numLevels}" style="padding: 8px 4px; border-bottom: 2px solid #334155; text-align: center; color: #cbd5e1; font-weight: bold;">${group.label}</th>`;
+    tableHtml += `<th colspan="${numLevels}" style="padding: 8px 4px; border-bottom: 2px solid #334155; border-left: 1px solid #475569; border-right: 1px solid #475569; text-align: center; color: #cbd5e1; font-weight: bold;">${group.label}</th>`;
   });
   tableHtml += '</tr>';
   
-  // Level header row (TEST)
+  // Level header row (RESULT)
   tableHtml += '<tr>';
-  tableHtml += '<th style="padding: 6px 4px; border-bottom: 1px solid #475569; text-align: center; color: #a78bfa; font-weight: 600;">TEST</th>';
+  tableHtml += '<th style="padding: 6px 4px; border-bottom: 1px solid #475569; text-align: center; color: #a78bfa; font-weight: 600;">RESULT</th>';
   config.ageGroups.forEach(group => {
-    config.levels.forEach(label => {
-      tableHtml += `<th style="padding: 6px 4px; border-bottom: 1px solid #475569; text-align: center; color: #a78bfa; font-weight: 600;">${label}</th>`;
+    config.levels.forEach((label, levelIdx) => {
+      const borderLeft = levelIdx === 0 ? 'border-left: 1px solid #475569;' : '';
+      const borderRight = levelIdx === numLevels - 1 ? 'border-right: 1px solid #475569;' : '';
+      tableHtml += `<th style="padding: 6px 4px; border-bottom: 1px solid #475569; ${borderLeft} ${borderRight} text-align: center; color: #a78bfa; font-weight: 600;">${label}</th>`;
     });
   });
   tableHtml += '</tr>';
@@ -40,7 +42,9 @@ export function renderQualifyingTimesGrid(category) {
   config.ageGroups.forEach(group => {
     config.levels.forEach((_, levelIdx) => {
       const placeholder = group.defaults[levelIdx] ?? '';
-      tableHtml += `<td style="padding: 4px 2px;"><input type="number" step="0.01" min="0" data-group-key="${group.key}" data-level-index="${levelIdx}" placeholder="${placeholder}m" style="width: 100%; padding: 6px 4px; background: #0f172a; border: 1px solid #334155; border-radius: 3px; color: #e2e8f0; font-size: 11px; box-sizing: border-box; text-align: center;" /></td>`;
+      const borderLeft = levelIdx === 0 ? 'border-left: 1px solid #475569;' : '';
+      const borderRight = levelIdx === numLevels - 1 ? 'border-right: 1px solid #475569;' : '';
+      tableHtml += `<td style="padding: 4px 2px; ${borderLeft} ${borderRight}"><input type="number" step="0.01" min="0" data-group-key="${group.key}" data-level-index="${levelIdx}" placeholder="${placeholder}m" style="width: 100%; padding: 6px 4px; background: #0f172a; border: 1px solid #334155; border-radius: 3px; color: #e2e8f0; font-size: 11px; box-sizing: border-box; text-align: center;" /></td>`;
     });
   });
   tableHtml += '</tr>';
@@ -126,6 +130,7 @@ export async function submitCreateRace(formElement) {
           scheduled_date: isoDate,
           description: formData.description || undefined,
           race_category: category,
+          rfid_placement_mode: formData.rfid_placement_mode || 'end_intersection',
           ...qualifyingPayload,
           ...(copyFromRaceId ? { copy_from_race_id: copyFromRaceId } : {}),
         },
@@ -143,9 +148,9 @@ export async function submitCreateRace(formElement) {
     }, 2000);
     
   } catch (err) {
-    console.error(err);
-    showToast(`Create race failed: ${err.message}`, 'error');
-    alert(`Create race failed: ${err.message}`);
+    console.error("ERROR:", err.message, "CODE:", err.error_code, "DETAILS:", err.details)
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Create race failed${codeTag}: ${err.message}`, 'error');
   }
 }
 

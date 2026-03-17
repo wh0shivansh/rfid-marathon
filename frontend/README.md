@@ -1,381 +1,184 @@
-# RFID Marathon Management System - Frontend (Electron)
+# RFID Marathon Management System - Frontend
 
-Secure, offline-first Electron desktop app for RFID-based marathon management.
+Electron desktop client for race creation, runner registration, race start control, scoreboard review, and results export against the v2 backend.
 
-## 🎯 Core Capabilities
+## Current Scope
 
-- **Authentication**: Username/password → JWT from backend.
-- **Race Selection**: Chosen once per session; locked to prevent context switching.
-- **Registration Loop**: Continuous RFID scanning without screen switching (400+ entrants).
-- **Encryption**: Backend responses (names) arrive RSA-encrypted; decrypted locally with private key.
-- **Timing Devices**: Device 1 records start, Device 2 records end.
-- **Offline Mode**: All actions cached in SQLite; sync queue with handshake confirmation.
-- **States**: Registered / Started / Finished / Pending Sync / Synced.
+- Login against the backend API and keep auth in app state.
+- Create and edit races from the desktop UI.
+- Configure race category qualifying thresholds.
+- Configure RFID placement mode per race before start.
+- Start races with frontend-selected start times.
+- View race-start progress and scoreboard data.
+- Export scoreboard results to Excel, Word, and PDF.
 
----
+## RFID Placement Modes
 
-## 🏗️ Architecture
+The frontend now supports two race timing modes:
 
-### Layers
+- `mid_end_reader_diff`: runners are expected to hit both mid and end readers.
+- `end_intersection`: runners are evaluated without a mid checkpoint.
 
+Mode affects the UI and exports:
+
+- Create Race includes an RFID placement mode selector.
+- Race edit allows mode changes only while the race is still in `created` status.
+- Race Start shows a mode label and provides a mode edit action before start.
+- Race Start statistics and candidate columns hide the mid-point section for `end_intersection`.
+- Scoreboard hides the `Mid Time` column for `end_intersection`.
+- Excel, Word, and PDF exports omit the `Mid Time` column for `end_intersection`.
+
+## Race Start Behavior
+
+When a race is started from the frontend:
+
+- The selected start time is combined with the selected race date without UTC date shifting.
+- The frontend sends `scheduled_date` in the start request body.
+- If the backend detects that the incoming scheduled date differs from the stored race date, it updates the database before timing proceeds.
+
+This avoids the earlier issue where edited race dates could produce an incorrect duration near 24 hours at start.
+
+## Scoreboard Export Behavior
+
+The frontend supports three export formats from the scoreboard screen:
+
+- Excel via `buildXlsx`
+- Word via `buildDocx`
+- PDF via `buildPdf`
+
+Recent export updates:
+
+- Export columns follow the active race mode.
+- Word tables use fixed column widths and landscape page layout.
+- PDF tables use measured text wrapping and landscape layout.
+- Long cell content wraps instead of spilling into adjacent columns.
+
+## Validation and Error Handling
+
+The renderer now surfaces backend validation details more clearly:
+
+- API helpers normalize backend error payloads.
+- Request validation errors are shown with field-level messages when available.
+- UI toasts include backend error codes when present.
+
+This is applied across race creation, race updates, candidate registration, candidate updates, candidate deletion, and bulk upload flows.
+
+## Bulk RFID Test Sender
+
+For backend timing tests, use [backend/v2/send_test_tag.py](../backend/v2/send_test_tag.py).
+
+What it does:
+
+- Builds dummy RFID tag-read payloads in the same shape used by the listener flow.
+- Converts them into a bulk request for `/api/v2/rfid/bulk`.
+- Infers `reader_id` from `READER_NAME`.
+- Prints the resolved timing point and reader ID before posting.
+
+Example configuration inside the script:
+
+- `START_COUNT`
+- `END_COUNT`
+- `READER_NAME`
+- `BULK_ENDPOINT_URL`
+- `DRY_RUN`
+
+Common mapping:
+
+- `Reader 2` -> mid -> `reader_id = 2`
+- `Reader 3` -> end -> `reader_id = 3`
+
+## Frontend Structure
+
+```text
+frontend/
+├── src/
+│   ├── main/
+│   ├── preload.js
+│   ├── renderer/
+│   │   ├── app.js
+│   │   ├── services/
+│   │   └── views/
+│   ├── index.js
+│   └── index.css
+├── public/
+└── package.json
 ```
-┌─────────────────────────────────────┐
-│    Frontend (Electron + React)      │
-│    • User interface                 │
-│    • Offline SQLite cache           │
-│    • RSA decryption                 │
-│    • Sync queue management          │
-└──────────────┬──────────────────────┘
-               │ HTTPS + JWT
-               ▼
-┌─────────────────────────────────────┐
-│    Backend (FastAPI - 8000)         │
-│    • State management               │
-│    • Database operations            │
-│    • Encryption                     │
-└──────────────┬──────────────────────┘
-               │ SSL
-               ▼
-┌─────────────────────────────────────┐
-│    Supabase PostgreSQL              │
-│    • races                          │
-│    • participants_{race_id}         │
-│    • users                          │
-└─────────────────────────────────────┘
 
-     NOTE: RFID Listener (9090)
-      is SEPARATE from Frontend
-    (runs on race management server)
-    Frontend DOES NOT interact with it
-```
+Key frontend areas:
 
-### Frontend vs. Backend vs. Listener
+- `src/preload.js`: exposes secure export helpers to the renderer.
+- `src/renderer/app.js`: shared API request and error parsing helpers.
+- `src/renderer/views/CreateRace.js`: race creation form and RFID mode selector.
+- `src/renderer/services/RaceStart.js`: race start date handling, mode-aware polling, and mode editing.
+- `src/renderer/views/Scoreboard.js`: mode-aware scoreboard columns.
+- `src/renderer/services/Scoreboard.js`: mode-aware export builders.
 
-| Component | Role | Storage | State |
-|-----------|------|---------|-------|
-| **Frontend** (Electron) | User interface | SQLite local | Race selection, queue |
-| **Backend** (Port 8000) | API, state management | PostgreSQL | race_state.json |
-| **RFID Listener** (Port 9090) | Hub interface | **NONE** | Stateless proxy |
+## Environment Setup
 
-**Important**: The RFID Listener (9090) has **ZERO local storage**. It's a stateless proxy that only forwards hits to the backend. The frontend does NOT interact with the listener.
-
----
-
-## 🔧 Environment Setup
-
-1. Copy `.env.template` to `.env` and fill values:
-   - `VITE_API_BASE_URL`: Backend URL (e.g., `http://localhost:8000/api/v1`). **NOT listener 9090.**
-   - `RFID_USERNAME` / `RFID_PASSWORD`: Login credentials (hashed server-side on backend).
-   - `FRONTEND_RSA_PRIVATE_KEY_PATH`: Local private key for decrypting participant names.
-
-2. Install dependencies:
+1. Install dependencies:
 
 ```bash
 cd frontend
 npm install
 ```
 
-3. Run in dev:
+2. Configure environment values as needed for the desktop app.
+
+Typical backend base URL:
+
+```text
+VITE_API_BASE_URL=http://localhost:8000/api/v2
+```
+
+3. Start the frontend in development:
 
 ```bash
 npm run dev
 ```
 
-4. Build:
+4. Build the desktop app:
 
 ```bash
 npm run build
 ```
 
----
+## Manual Test Checklist
 
-## 💾 Offline-First Workflow
+### Race Mode
 
-### Cache System
+1. Create a race in `mid_end_reader_diff` and confirm Race Start and Scoreboard show `Mid Time`.
+2. Create a race in `end_intersection` and confirm Race Start and Scoreboard hide `Mid Time`.
+3. Edit a race in `created` status and confirm mode can be changed.
+4. Start the race and confirm mode editing is disabled afterward.
 
-- **Local DB**: SQLite `rfid_offline.db` with tables for participants, timings, sync queue.
-- **Stored Data**:
-  - Registrations (rfid_tag, name)
-  - Timing events (start_time, end_time)
-  - Sync queue (what needs to be sent to backend)
+### Race Start Date Sync
 
-### Recording (Online & Offline)
+1. Edit a race scheduled date.
+2. Start the race with a frontend-selected time.
+3. Confirm duration starts from the correct date context.
+4. Confirm the backend stores the updated scheduled date only when it differs.
 
-```
-Online Mode:
-  1. RFID scan → POST /participant/register → Backend encrypts & stores → Returns encrypted name
-  2. Decrypt locally → Display confirmation → Update local SQLite
+### Exports
 
-Offline Mode:
-  1. RFID scan → Insert into sync_queue table (action="register")
-  2. Local SQLite stores encrypted data + metadata
-  3. Display confirmation (cached or new)
+1. Export a scoreboard in Excel, Word, and PDF.
+2. Confirm `Mid Time` is omitted for `end_intersection`.
+3. Confirm long names wrap correctly in Word and PDF exports.
 
-Sync Process (When Online):
-  1. Background job detects connectivity
-  2. POST sync_queue items to backend
-  3. Backend validates & stores
-  4. Receive confirmation IDs
-  5. POST /sync/handshake with IDs
-  6. Delete confirmed records from sync_queue
-  7. Update local participants table
-```
+### Bulk RFID Test
 
-### Queue Table Schema
+1. Set `READER_NAME` in [backend/v2/send_test_tag.py](../backend/v2/send_test_tag.py).
+2. Run the sender against the v2 backend.
+3. Confirm the printed `reader_id` matches the intended timing point.
+4. Confirm the backend log shows the same `reader_id`.
 
-```sql
-CREATE TABLE sync_queue (
-  id TEXT PRIMARY KEY,
-  action TEXT,              -- "register", "timing_start", "timing_end"
-  race_id TEXT NOT NULL,
-  rfid_tag TEXT,
-  name TEXT,                -- for registrations
-  timestamp TIMESTAMPTZ,    -- for timing events
-  device_id INTEGER,        -- 1=start, 2=end
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  synced_at TIMESTAMPTZ,
-  synced BOOLEAN DEFAULT FALSE
-);
-```
+## Status
 
-### Idempotency
+- Frontend is running against the v2 API surface.
+- Mode-aware race flow is implemented.
+- Mode-aware scoreboard exports are implemented.
+- Word and PDF export wrapping is implemented.
+- Validation error messages are surfaced more clearly in the UI.
 
-- Backend rejects duplicates via unique constraints
-- Frontend retains original timestamps (no tampering on retry)
-- Sync handshake ensures "exactly once" semantics
-
----
-
-## 🔐 Security Boundaries
-
-### What Stays Local
-
-- **Private RSA Key**: Never sent to backend. Used locally to decrypt participant names.
-- **JWT Token**: Stored in memory (not disk) during session.
-- **SQLite Database**: Local device only. Contains queue of syncs + cached data.
-
-### What Goes to Backend (Over HTTPS)
-
-- **Registrations**: {race_id, rfid_tag, name, ...}
-- **Timing Events**: {race_id, rfid_tag, timestamp, device_id}
-- **Sync Handshake**: {confirmed_ids, failed_ids}
-
-### What Never Touches Network
-
-- **Participant Names** (decryption): Local only. Backend sends RSA-encrypted; frontend decrypts.
-- **SQLite Data**: Never uploaded raw. Only sync_queue items sent.
-
-### Backend Security
-
-- All requests carry `Authorization: Bearer <token>`, `X-Timestamp`, `X-Nonce`
-- Rate limiting: 60 requests/minute per IP
-- Database stores Fernet-encrypted names; RFID tags plaintext
-- Backend enforces unique constraints to prevent duplicates
-
----
-
-## 📱 UI Flow
-
-```
-1. Login
-   ├─ Enter username/password
-   ├─ POST /auth/login
-   ├─ Store JWT in memory
-   └─ Proceed if successful
-
-2. Select Race (One Time)
-   ├─ Display race list (GET /race)
-   ├─ User selects race
-   ├─ Lock race_id for session
-   └─ Proceed to registration
-
-3. Registration Loop (Continuous)
-   ├─ RFID scan
-   ├─ Prompt for name (if new)
-   ├─ POST /participant/register (online) or insert sync_queue (offline)
-   ├─ Display encrypted name or cached entry
-   ├─ Mark as "Registered"
-   └─ Return to scan (no screen change)
-
-4. Start Timing (Official Call)
-   ├─ Backend calls POST /api/v1/timing/start
-   ├─ Grace period initialized (120 seconds)
-   ├─ Frontend displays "Timing Started"
-
-5. Record Timing
-   ├─ Device 1 (RFID at start): Listener forwards to /api/v1/rfid/record-start
-   ├─ Device 2 (RFID at finish): Listener forwards to /api/v1/rfid/record-end
-   ├─ Backend updates start_time/end_time in participant table
-   ├─ Frontend polls /api/v1/dashboard-data for updates
-   └─ Display "Finished" + duration
-
-6. Results Dashboard
-   ├─ Decrypt cached names locally
-   ├─ Display standings (race_id-specific participant table)
-   └─ Show sync status
-```
-
----
-
-## 🔄 Sync Handshake
-
-### Process
-
-```
-1. Frontend detects connectivity
-2. Builds batch of sync_queue records
-3. POST batch to backend
-   Example: [
-     {action: "register", race_id: 1, rfid_tag: "A123", name: "John"},
-     {action: "timing_start", race_id: 1, rfid_tag: "B456", timestamp: "2026-01-22T15:00:01Z"}
-   ]
-4. Backend processes & stores (returns IDs)
-5. Frontend calls POST /sync/handshake {record_ids: ["id1", "id2", ...]}
-6. Backend confirms sync status
-7. Frontend deletes confirmed records from sync_queue
-```
-
-### Retry Logic
-
-- If network fails mid-sync: Records remain in queue
-- Automatic retry on next connectivity check
-- Exponential backoff (1s, 2s, 4s, 8s...)
-- User sees "Pending Sync" status until confirmed
-
----
-
-## 🔑 Key Management
-
-### Generate RSA Keys
-
-```bash
-# Generate 4096-bit private key
-openssl genrsa -out keys/frontend_private.pem 4096
-
-# Extract public key (for sharing)
-openssl rsa -in keys/frontend_private.pem -pubout -out keys/frontend_public.pem
-
-# Show key info
-openssl rsa -in keys/frontend_private.pem -text -noout | head -5
-```
-
-### Key Placement
-
-- **Private Key** (`frontend_private.pem`): Keep locally in frontend app directory
-- **Public Key**: Can be shared with backend (not needed for current design)
-- **Env Path**: Set `FRONTEND_RSA_PRIVATE_KEY_PATH=./keys/frontend_private.pem` in `.env`
-
-### Key Rotation
-
-- **When**: Annually or after security incident
-- **How**: Generate new keys, update `.env`, restart frontend
-- **Note**: Old encrypted names still work if old public key is on backend
-
----
-
-## 📱 Component Structure
-
-```
-frontend/
-├── src/
-│   ├── main.js                     # Electron main process
-│   ├── preload.js                  # Preload script (context isolation)
-│   ├── renderer/
-│   │   ├── app.js                  # Root React component
-│   │   ├── views/
-│   │   │   ├── Login.js            # Authentication
-│   │   │   ├── RaceSelect.js       # Race picker (one-time)
-│   │   │   ├── Registration.js     # Continuous RFID scanning
-│   │   │   ├── Timing.js           # Start/end timing display
-│   │   │   └── Results.js          # Standings + sync status
-│   │   │
-│   │   └── utils/
-│   │       ├── API.js              # Backend communication
-│   │       ├── Database.js         # SQLite operations
-│   │       ├── Encryption.js       # RSA decryption
-│   │       └── SyncQueue.js        # Queue management
-│   │
-│   └── services/
-│       ├── ApiService.js           # API client (retry logic)
-│       ├── DatabaseService.js      # SQLite abstraction
-│       ├── EncryptionService.js    # RSA operations
-│       └── SyncService.js          # Sync queue processor
-│
-└── database/
-    └── schema.sql                  # SQLite schema (local)
-```
-
----
-
-## 🧪 Testing (Frontend)
-
-```bash
-# Unit tests for encryption helper
-npm test -- Encryption
-
-# Sync queue tests
-npm test -- SyncQueue
-
-# Manual test scenario:
-# 1. Start frontend (offline)
-# 2. Register participant → check sync_queue table
-# 3. Go online
-# 4. Verify auto-sync → check handshake success
-```
-
----
-
-## ⚠️ Known Limitations & TODOs
-
-- [ ] UI components not yet implemented (Vite + React setup only)
-- [ ] RFID hardware integration pending
-- [ ] Token refresh on expiry (currently 15 min)
-- [ ] Biometric authentication
-- [ ] Multi-language support
-- [ ] Real-time WebSocket updates (polling only)
-
----
-
-## 🚀 Deployment
-
-### Development
-
-```bash
-npm run dev
-```
-
-### Production Build
-
-```bash
-npm run build
-npm start
-```
-
-### Electron Packaging
-
-```bash
-npm run pack           # Build app
-npm run make          # Create installer
-```
-
----
-
-## 📝 Important Notes
-
-**The RFID Listener (Port 9090) is NOT part of the frontend.** It's a separate server-side component that:
-- Receives RFID hits from hardware hubs
-- Forwards them to the backend (port 8000)
-- Has ZERO local storage
-- Does NOT interact with this Electron app
-
-Frontend ONLY communicates with Backend (port 8000) for:
-- Authentication
-- Participant registration
-- Timing queries
-- Results
-
----
-
-**Last Updated**: January 22, 2026  
-**Version**: 2.0.0-alpha-alpha  
-**Status**: UI Components Pending
+**Last Updated**: March 17, 2026  
+**Version**: 2.0.0  
+**Status**: Completed development

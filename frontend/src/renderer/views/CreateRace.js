@@ -30,12 +30,20 @@ export function renderCreateRace() {
           </div>
 
           <div class="dark-form-group">
+            <label>RFID Placement Mode</label>
+            <select name="rfid_placement_mode" required>
+              <option value="mid_end_reader_diff" selected>Mid + End readers (reader differentiation)</option>
+              <option value="end_intersection">Dual End antennas (intersection, no mid check)</option>
+            </select>
+          </div>
+
+          <div class="dark-form-group">
             <label>Scheduled Date</label>
             <input name="scheduled_date" type="date" required />
           </div>
 
           <div class="dark-form-group">
-            <label>Description</label>
+            <label>Description (Optional)</label>
             <textarea name="description"></textarea>
           </div>
           

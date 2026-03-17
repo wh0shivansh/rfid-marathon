@@ -27,6 +27,7 @@ from constants import (
     RFID_TAG_MAX_LENGTH,
     RaceStatus,
     RaceCategory,
+    RaceRFIDMode,
 )
 from basefunctions import validate_rfid_tag, generate_uuid
 
@@ -125,6 +126,7 @@ class RaceCreateRequest(BaseModel):
     description: Optional[str] = Field(None, max_length=1000)
     copy_from_race_id: Optional[str] = Field(None, description="Optional race ID to copy participants from")
     race_category: RaceCategory = Field(RaceCategory.BPET)
+    rfid_placement_mode: RaceRFIDMode = Field(RaceRFIDMode.MID_END_READER_DIFF)
     # Qualifying times (seconds) stored as per-age lists
     bpet_age_upto30: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_upto30"].copy())
     bpet_age_upto40: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_upto40"].copy())
@@ -157,6 +159,7 @@ class RaceUpdateRequest(BaseModel):
     description: Optional[str] = Field(None, max_length=1000)
     status: Optional[RaceStatus] = None
     race_category: Optional[RaceCategory] = None
+    rfid_placement_mode: Optional[RaceRFIDMode] = None
     bpet_age_upto30: Optional[List[float]] = None
     bpet_age_upto40: Optional[List[float]] = None
     bpet_age_40_45: Optional[List[float]] = None
@@ -191,6 +194,7 @@ class RaceResponse(BaseModel):
     description: Optional[str]
     status: RaceStatus
     race_category: RaceCategory
+    rfid_placement_mode: RaceRFIDMode
     created_at: datetime
     updated_at: datetime
     table_name: str
@@ -471,6 +475,7 @@ class Race(Base):
     status = Column(String(50), default=RaceStatus.CREATED.value, nullable=False)
     table_name = Column(String(128), nullable=False, unique=True)  # Maps to participants table for this race
     race_category = Column(String(50), nullable=False, default=RaceCategory.BPET.value)  # e.g., 'BPET', 'CPT', 'PPT'
+    rfid_placement_mode = Column(String(50), nullable=False, default=RaceRFIDMode.MID_END_READER_DIFF.value)
 
     # Qualifying times (seconds) stored as JSONB lists per age group
     bpet_age_upto30 = Column(JSONB, nullable=False, default=lambda: [1500.0, 1578.0, 1620.0])
@@ -501,6 +506,7 @@ class Race(Base):
         CheckConstraint('distance_meters >= 10 AND distance_meters <= 100000', name='check_race_distance'),
         CheckConstraint("status IN ('created', 'started', 'completed')", name='check_race_status'),
         CheckConstraint("race_category IN ('BPET', 'CPT', 'PPT')", name='check_race_category'),
+        CheckConstraint("rfid_placement_mode IN ('mid_end_reader_diff', 'end_intersection')", name='check_race_rfid_placement_mode'),
         CheckConstraint("jsonb_typeof(bpet_age_upto30) = 'array' AND jsonb_array_length(bpet_age_upto30) = 3", name='check_bpet_age_upto30_len'),
         CheckConstraint("jsonb_typeof(bpet_age_upto40) = 'array' AND jsonb_array_length(bpet_age_upto40) = 3", name='check_bpet_age_upto40_len'),
         CheckConstraint("jsonb_typeof(bpet_age_40_45) = 'array' AND jsonb_array_length(bpet_age_40_45) = 3", name='check_bpet_age_40_45_len'),

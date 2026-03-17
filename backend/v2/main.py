@@ -29,6 +29,7 @@ import pandas as pd
 from docx import Document # type: ignore
 
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Body, UploadFile, File
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -97,7 +98,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RFID Marathon Management System",
-    version="2.0.0-alpha",
+    version="2.0.0",
     description="Military-grade, audit-ready marathon timing backend",
     docs_url=f"{API_PREFIX}/docs",
     openapi_url=f"{API_PREFIX}/openapi.json",
@@ -193,6 +194,15 @@ async def validation_error_handler(_request: Request, exc: ValidationError):
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content=create_error_response("VALIDATION_ERROR", exc.message, exc.details)
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(_request: Request, exc: RequestValidationError):
+    details = {"errors": exc.errors()}
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=create_error_response("REQUEST_VALIDATION_ERROR", "Invalid request payload", details)
     )
 
 
@@ -381,6 +391,7 @@ async def create_race(
         created_by=_user["sub"],
         copy_from_race_id=payload.copy_from_race_id,
         race_category=str(payload.race_category.value if hasattr(payload.race_category, "value") else payload.race_category),
+        rfid_placement_mode=str(payload.rfid_placement_mode.value if hasattr(payload.rfid_placement_mode, "value") else payload.rfid_placement_mode),
         bpet_age_upto30=payload.bpet_age_upto30,
         bpet_age_upto40=payload.bpet_age_upto40,
         bpet_age_40_45=payload.bpet_age_40_45,
@@ -574,6 +585,7 @@ async def update_race_start_times(
 @app.post(f"{API_PREFIX}/race/{{race_id}}/start")
 async def start_race(
     race_id: str,
+    payload: dict = Body(default={}),
     db: Session = Depends(get_db_session),
     user=Depends(get_current_user)
 ):
@@ -611,6 +623,29 @@ async def start_race(
 
     # Promote race to STARTED
     race = race_service.update_race_status(db=db, race_id=race_id, new_status=RaceStatus.STARTED)
+    
+    # If frontend supplies a scheduled datetime and it differs, overwrite races.scheduled_date.
+    frontend_scheduled_date = payload.get("scheduled_date") if isinstance(payload, dict) else None
+    if frontend_scheduled_date:
+        try:
+            parsed_frontend_scheduled = parser.isoparse(str(frontend_scheduled_date))
+            if parsed_frontend_scheduled.tzinfo is None:
+                parsed_frontend_scheduled = parsed_frontend_scheduled.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+
+            existing_scheduled = getattr(race, "scheduled_date", None)
+            existing_scheduled_dt = _coerce_datetime(existing_scheduled, parsed_frontend_scheduled.tzinfo)
+
+            if (
+                existing_scheduled_dt is None
+                or existing_scheduled_dt.astimezone(ZoneInfo("UTC")) != parsed_frontend_scheduled.astimezone(ZoneInfo("UTC"))
+            ):
+                race = race_service.update_race(
+                    db=db,
+                    race_id=race_id,
+                    scheduled_date=parsed_frontend_scheduled.isoformat(),
+                )
+        except Exception as exc:
+            raise ValidationError(f"Invalid scheduled_date provided from frontend: {exc}")
 
     assigned_count = 0
     try:
@@ -1539,7 +1574,7 @@ async def rfid_bulk_upload(
                     logger.info(f"[RFID_BULK] No update for end_time RFID {rfid_tag} (already set or not found) in table {table_name}")
             else:
                 # reader_id == 1 (start) or unknown: ignore for v2 timing
-                logger.debug(f"[RFID_BULK] Skipping reader_id {entry.reader_id} (start or unknown)")
+                logger.info(f"[RFID_BULK] Skipping reader_id {entry.reader_id} (start or unknown)")
                 continue
 
         db.commit()
@@ -1802,7 +1837,7 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         
         # Find the started race
         query = text("""
-            SELECT id, name, table_name, scheduled_date, status, race_category,
+            SELECT id, name, table_name, scheduled_date, status, race_category, rfid_placement_mode,
                    bpet_age_upto30, bpet_age_upto40, bpet_age_40_45, bpet_start_time,
                    cpt_age_upto35, cpt_age_35_45, cpt_age_45_50, cpt_age_50_55, cpt_age_55_60, cpt_start_time,
                    ppt_age_upto30, ppt_age_30_40, ppt_age_40_45, ppt_age_45_50, ppt_start_time
@@ -1868,7 +1903,9 @@ async def _handle_rfid_end(rfid_tag: str, db: Session, hit_timestamp: Optional[s
         effective_start_time = _coerce_datetime(effective_start_time, cast(Optional[tzinfo], fallback_tz))
 
         fail_reasons = []
-        if mid_time is None:
+        race_mode = str(getattr(race_row, "rfid_placement_mode", "mid_end_reader_diff") or "mid_end_reader_diff")
+        requires_mid = race_mode != "end_intersection"
+        if requires_mid and mid_time is None:
             fail_reasons.append("mid_time missing")
 
         max_allowed_seconds = _get_max_allowed_seconds(participant_age, race_row)

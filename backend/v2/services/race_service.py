@@ -26,6 +26,7 @@ from basefunctions import (
 )
 from constants import (
     RaceCategory,
+    RaceRFIDMode,
     RaceStatus,
     RACE_STATUS_TRANSITIONS,
     RACE_MIN_DISTANCE_METERS,
@@ -51,6 +52,7 @@ class RaceService:
         copy_from_race_id: Optional[str] = None,
         description: Optional[str] = None,
         race_category: Optional[Union[str, RaceCategory]] = None,
+        rfid_placement_mode: Optional[Union[str, RaceRFIDMode]] = None,
         bpet_age_upto30: Optional[List[float]] = None,
         bpet_age_upto40: Optional[List[float]] = None,
         bpet_age_40_45: Optional[List[float]] = None,
@@ -118,6 +120,11 @@ class RaceService:
                     race_category.value
                     if isinstance(race_category, RaceCategory)
                     else str(race_category or "BPET")
+                ),
+                rfid_placement_mode=(
+                    rfid_placement_mode.value
+                    if isinstance(rfid_placement_mode, RaceRFIDMode)
+                    else str(rfid_placement_mode or RaceRFIDMode.END_INTERSECTION.value)
                 ),
                 bpet_age_upto30=bpet_age_upto30,
                 bpet_age_upto40=bpet_age_upto40,
@@ -425,7 +432,7 @@ class RaceService:
         # Update allowed fields
         allowed_fields = [
             'name', 'distance_meters', 'location',
-            'scheduled_date', 'description', 'status', 'race_category',
+            'scheduled_date', 'description', 'status', 'race_category', 'rfid_placement_mode',
             'bpet_age_upto30', 'bpet_age_upto40', 'bpet_age_40_45',
             'cpt_age_upto35', 'cpt_age_35_45', 'cpt_age_45_50', 'cpt_age_50_55', 'cpt_age_55_60',
             'ppt_age_upto30', 'ppt_age_30_40', 'ppt_age_40_45', 'ppt_age_45_50',
@@ -445,6 +452,9 @@ class RaceService:
                     self.update_race_status(db, race_id, requested_status)
                     # status handled separately
                     continue
+
+                if field == 'rfid_placement_mode' and getattr(race, 'status', None) != RaceStatus.CREATED.value:
+                    raise ValidationError("RFID placement mode can only be updated before the race starts")
 
                 # Convert scheduled_date if it's a string
                 if field == 'scheduled_date' and isinstance(value, str):

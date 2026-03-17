@@ -135,7 +135,7 @@ export async function goToRegistrationStep3() {
 // ============================================================================
 
 export async function submitRegistration() {
-  const { state, getSelectedRaceId, getRFIDSetForRace, render, ensureAuth } = window.appContext;
+  const { state, apiRequest, getSelectedRaceId, getRFIDSetForRace, render, ensureAuth } = window.appContext;
   
   const name = document.getElementById('name').value;
   const age = document.getElementById('age').value;
@@ -159,64 +159,56 @@ export async function submitRegistration() {
 
   try {
     await ensureAuth();
-    const response = await fetch(`${state.config.apiBaseUrl}/participant/register`, {
+    const result = await apiRequest('/participant/register', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.auth.token}`
-      },
-      body: JSON.stringify({
+      body: {
         race_id: state.selectedRace,
         rfid_tag: rfid.toUpperCase(),
         name: name,
         age: age ? Number(age) : undefined,
         gender: gender.toUpperCase()
-      })
+      }
     });
 
-    const data = await response.json();
-    if (data.success) {
-      // Add RFID to per-race set to prevent duplicate registration in same race/session
-      const rfidUpper = rfid.toUpperCase();
-      const raceId = getSelectedRaceId();
-      if (raceId) {
-        const set = getRFIDSetForRace(raceId);
-        console.debug('[Registration][submitRegistration] before add perRace_has=', set.has(rfidUpper), 'size=', set.size);
-        set.add(rfidUpper);
-        console.debug('[Registration][submitRegistration] after add size=', set.size);
-      }
-      
-      document.getElementById('registration-form').reset();
-      
-      const timestamp = new Date().toLocaleTimeString();
-      const race = state.races.find(r => r.id === state.selectedRace);
-      const raceName = race ? race.name : 'Unknown Race';
-      const category = data.data.category || 'N/A';
-      
-      // Add to session registrations array
-      state.todayRegistrations.unshift({
-        name: name,
-        raceName: raceName,
-        rfid: rfid.toUpperCase(),
-        age: age || 'N/A',
-        gender: gender || 'N/A',
-        category: category,
-        timestamp: timestamp
-      });
-      
-      showToast('Participant registered successfully!', 'success');
-      state.registrationStep = 2;
-      state.scannedRFID = null;
-      render();
-      startRFIDListener();
-      
-      console.log('Participant registered successfully');
-    } else {
-      showToast(`Registration failed: ${data.message || 'Unknown error'}`, 'error');
+    // Add RFID to per-race set to prevent duplicate registration in same race/session
+    const rfidUpper = rfid.toUpperCase();
+    const raceId = getSelectedRaceId();
+    if (raceId) {
+      const set = getRFIDSetForRace(raceId);
+      console.debug('[Registration][submitRegistration] before add perRace_has=', set.has(rfidUpper), 'size=', set.size);
+      set.add(rfidUpper);
+      console.debug('[Registration][submitRegistration] after add size=', set.size);
     }
+    
+    document.getElementById('registration-form').reset();
+    
+    const timestamp = new Date().toLocaleTimeString();
+    const race = state.races.find(r => r.id === state.selectedRace);
+    const raceName = race ? race.name : 'Unknown Race';
+    const category = result.category || 'N/A';
+    
+    // Add to session registrations array
+    state.todayRegistrations.unshift({
+      name: name,
+      raceName: raceName,
+      rfid: rfid.toUpperCase(),
+      age: age || 'N/A',
+      gender: gender || 'N/A',
+      category: category,
+      timestamp: timestamp
+    });
+    
+    showToast('Participant registered successfully!', 'success');
+    state.registrationStep = 2;
+    state.scannedRFID = null;
+    render();
+    startRFIDListener();
+    
+    console.log('Participant registered successfully');
   } catch (err) {
     console.error('Registration error:', err);
-    showToast(`Registration failed: ${err.message}`, 'error');
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Registration failed${codeTag}: ${err.message}`, 'error');
   }
 }
 
@@ -244,7 +236,8 @@ export async function uploadBulkCandidates(raceId, file) {
     }, 500);
   } catch (err) {
     console.error(err);
-    showToast(`Bulk upload failed: ${err.message}`, 'error', 10000);
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Bulk upload failed${codeTag}: ${err.message}`, 'error', 10000);
     throw err;
   }
 }
@@ -408,8 +401,8 @@ export async function registerRunner(formData) {
     render();
   } catch (err) {
     console.error(err);
-    showToast(`Registration failed: ${err.message}`, 'error');
-    alert(`Registration failed: ${err.message}`);
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Registration failed${codeTag}: ${err.message}`, 'error');
   }
 }
 

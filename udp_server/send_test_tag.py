@@ -32,7 +32,7 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # send bulk of tags with timestamps to mimic udp_sender batching
 batch = []
 now_ms = lambda: int(time.time() * 1000)
-for i in range(11, 51):
+for i in range(1, 16):
   batch.append({
     "epc": f"315354010100000000000{str(i).zfill(3)}",
     "ft": now_ms(),

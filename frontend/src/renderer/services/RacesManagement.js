@@ -25,7 +25,8 @@ export async function updateRace(raceId, updates) {
     }, 500);
   } catch (err) {
     console.error(err);
-    showToast(`Failed to update race: ${err.message}`, 'error');
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Failed to update race${codeTag}: ${err.message}`, 'error');
     throw err;
   }
 }
@@ -54,7 +55,8 @@ export async function deleteRace(raceId) {
     }, 500);
   } catch (err) {
     console.error(err);
-    showToast(`Failed to delete race: ${err.message}`, 'error');
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Failed to delete race${codeTag}: ${err.message}`, 'error');
     throw err;
   }
 }
@@ -78,7 +80,8 @@ export async function endRace(raceId) {
     }, 500);
   } catch (err) {
     console.error(err);
-    showToast(`Failed to end race: ${err.message}`, 'error');
+    const codeTag = err.error_code ? ` [${err.error_code}]` : '';
+    showToast(`Failed to end race${codeTag}: ${err.message}`, 'error');
     throw err;
   }
 }
@@ -93,6 +96,7 @@ export function openRaceEditModal(race) {
   if (!race) return;
 
   const modalContainer = document.createElement('div');
+  const canEditMode = (race?.status || 'created') === 'created';
   modalContainer.innerHTML = `
     <div class="dark-modal-overlay" style="display: flex;">
       <div class="dark-modal" style="max-width: 650px;">
@@ -149,6 +153,17 @@ export function openRaceEditModal(race) {
                 </label>
                 <input type="text" data-field="location" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
               </div>
+
+              <div class="dark-form-group">
+                <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                  <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📡 RFID Placement Mode</span>
+                </label>
+                <select data-field="rfid_placement_mode" ${canEditMode ? '' : 'disabled'} style="padding: 12px 14px; font-size: 14px; border-radius: 6px; border: 2px solid #334155; width:100%; background: #0f172a; color: #e2e8f0;">
+                  <option value="mid_end_reader_diff">Mid + End readers (reader differentiation)</option>
+                  <option value="end_intersection">Dual End antennas (intersection, no mid check)</option>
+                </select>
+                ${canEditMode ? '' : '<div style="margin-top: 6px; color: #94a3b8; font-size: 12px;">Mode can be changed only before race start.</div>'}
+              </div>
             </div>
           </div>
 
@@ -187,6 +202,7 @@ export function openRaceEditModal(race) {
   const locationEl = modalContainer.querySelector('[data-field="location"]');
   const scheduledEl = modalContainer.querySelector('[data-field="scheduled_date"]');
   const descriptionEl = modalContainer.querySelector('[data-field="description"]');
+  const modeEl = modalContainer.querySelector('[data-field="rfid_placement_mode"]');
 
   if (nameEl) nameEl.value = race.name || '';
   if (distanceEl) distanceEl.value = race.distance_meters || '';
@@ -196,6 +212,7 @@ export function openRaceEditModal(race) {
     scheduledEl.value = d.toISOString().split('T')[0];
   }
   if (descriptionEl) descriptionEl.value = race.description || '';
+  if (modeEl) modeEl.value = race.rfid_placement_mode || 'end_intersection';
 
   if (form) {
     form.addEventListener('submit', async (e) => {
@@ -207,6 +224,9 @@ export function openRaceEditModal(race) {
         scheduled_date: scheduledEl.value,
         description: descriptionEl.value.trim(),
       };
+      if (canEditMode && modeEl) {
+        updates.rfid_placement_mode = modeEl.value || 'end_intersection';
+      }
       cleanup();
       await updateRace(race.id, updates);
     });

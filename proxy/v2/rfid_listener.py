@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 
-app = FastAPI(title="RFID Listener", version="2.0.0-alpha")
+app = FastAPI(title="RFID Listener", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,

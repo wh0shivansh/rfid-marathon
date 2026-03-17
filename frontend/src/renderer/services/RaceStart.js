@@ -56,6 +56,9 @@ export async function refreshRaceStartData() {
     
     // Fetch participants with timing data from backend using authenticated API request
     const participants = await apiRequest(`/race/${window.appContext.raceStartSelectedRaceId}/participants?include_timing=true`);
+    const selectedRace = state.races.find(r => r.id === window.appContext.raceStartSelectedRaceId);
+    const raceMode = selectedRace?.rfid_placement_mode || 'end_intersection';
+    const usesMidPoint = raceMode !== 'end_intersection';
     
     console.debug(`[RaceStart Polling] Received ${participants.length} participants`);
     
@@ -64,7 +67,7 @@ export async function refreshRaceStartData() {
       registered: participants.filter(p => p.status === 'registered'),
       grace: participants.filter(p => p.status === 'grace'),
       running: participants.filter(p => p.status === 'running'),
-      mid: participants.filter(p => p.mid_time !== null),
+      mid: usesMidPoint ? participants.filter(p => p.mid_time !== null) : [],
       completed: participants.filter(p => p.end_time !== null)
     };
     
@@ -89,6 +92,11 @@ export function updateRaceStartCandidateDisplay(grouped) {
   const container = document.getElementById('groups-container');
   if (!container) return;
 
+  const { state, raceStartSelectedRaceId } = window.appContext;
+  const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
+  const raceMode = selectedRace?.rfid_placement_mode || 'end_intersection';
+  const usesMidPoint = raceMode !== 'end_intersection';
+
   const { registered = [], grace = [], running = [], mid = [], completed = [] } = grouped;
 
   if (registered.length === 0 && grace.length === 0 && running.length === 0 && mid.length === 0 && completed.length === 0) {
@@ -109,22 +117,37 @@ export function updateRaceStartCandidateDisplay(grouped) {
     `;
   };
 
-  // Render three sections: Registered, Mid-point, Completed
-  const html = `
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
-      ${renderParticipantList('Registered', '#a78bfa', registered, 'No runners started yet')}
-      ${renderParticipantList('Mid-point', '#60a5fa', mid, 'No runners reached mid-point yet')}
-      ${renderParticipantList('Completed', '#34d399', completed, 'No finished runners yet')}
-    </div>
-  `;
+  const html = usesMidPoint
+    ? `
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+        ${renderParticipantList('Registered', '#a78bfa', registered, 'No runners started yet')}
+        ${renderParticipantList('Mid-point', '#60a5fa', mid, 'No runners reached mid-point yet')}
+        ${renderParticipantList('Completed', '#34d399', completed, 'No finished runners yet')}
+      </div>
+    `
+    : `
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+        ${renderParticipantList('Registered', '#a78bfa', registered, 'No runners started yet')}
+        ${renderParticipantList('Completed', '#34d399', completed, 'No finished runners yet')}
+      </div>
+    `;
 
   container.innerHTML = html;
 }
 
 export function formatRaceStartCandidateRow(candidate, type) {
+  const { state, raceStartSelectedRaceId } = window.appContext;
+  const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
+  const raceMode = selectedRace?.rfid_placement_mode || 'end_intersection';
+  const usesMidPoint = raceMode !== 'end_intersection';
+
   let duration = '';
   
-  if (candidate.status === 'completed' && candidate.start_time && candidate.mid_time && candidate.end_time) {
+  const hasDurationTimes = usesMidPoint
+    ? (candidate.start_time && candidate.mid_time && candidate.end_time)
+    : (candidate.start_time && candidate.end_time);
+
+  if (candidate.status === 'completed' && hasDurationTimes) {
     const startTime = new Date(candidate.start_time);
     const endTime = new Date(candidate.end_time);
     const durationMs = endTime - startTime;
@@ -170,10 +193,22 @@ export function formatRaceStartCandidateRow(candidate, type) {
       </div>
     `;
   } else {
+    if (usesMidPoint) {
+      return `
+        <div style="display: grid; grid-template-columns: 180px 100px 100px 100px; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+          <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
+          <div>${startTimeStr}</div>
+          <div>${midTimeStr}</div>
+          <div>${endTimeStr}</div>
+        </div>
+      `;
+    }
+
     return `
-      <div style="display: grid; grid-template-columns: 180px 100px; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
+      <div style="display: grid; grid-template-columns: 180px 120px 120px; gap: 8px; padding: 8px; border-bottom: 1px solid #334155; color: ${color};">
         <div style="font-family: monospace; font-weight: bold;">${candidate.rfid_tag || 'N/A'}</div>
         <div>${startTimeStr}</div>
+        <div>${endTimeStr}</div>
       </div>
     `;
   }
@@ -184,6 +219,10 @@ export function updateRaceStartStatistics(participants) {
   let grace = 0;
   let running = 0;
   let completed = 0;
+  const { state, raceStartSelectedRaceId } = window.appContext;
+  const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
+  const raceMode = selectedRace?.rfid_placement_mode || 'end_intersection';
+  const usesMidPoint = raceMode !== 'end_intersection';
   console.log(participants);
   for (const p of participants) {
     if (p.status === 'grace') grace++;
@@ -199,9 +238,11 @@ export function updateRaceStartStatistics(participants) {
   if (startedEl) startedEl.textContent = startedCount;
 
   // Mid point: count participants who have a mid_time recorded
-  const midCount = participants.reduce((acc, x) => acc + (x.mid_time ? 1 : 0), 0);
-  const midEl = document.getElementById('stat-mid');
-  if (midEl) midEl.textContent = midCount;
+  if (usesMidPoint) {
+    const midCount = participants.reduce((acc, x) => acc + (x.mid_time ? 1 : 0), 0);
+    const midEl = document.getElementById('stat-mid');
+    if (midEl) midEl.textContent = midCount;
+  }
   
   const completedEl = document.getElementById('stat-completed');
   if (completedEl) completedEl.textContent = completed;
@@ -335,12 +376,20 @@ export function updateRaceDetailsDisplay() {
   
   const selectedRace = state.races.find(r => r.id === window.appContext.raceStartSelectedRaceId);
   const raceInfoEl = document.getElementById('race-info');
+  const raceModeLabelEl = document.getElementById('race-mode-label');
   
   if (!raceInfoEl) return;
   
   if (!selectedRace) {
     raceInfoEl.innerHTML = 'Select a race to view details';
+    if (raceModeLabelEl) raceModeLabelEl.textContent = 'Select a race';
     return;
+  }
+
+  if (raceModeLabelEl) {
+    raceModeLabelEl.textContent = (selectedRace.rfid_placement_mode === 'end_intersection')
+      ? 'Dual End antennas (intersection, no mid check)'
+      : 'Mid + End readers (reader differentiation)';
   }
   
   // Format scheduled date
@@ -387,6 +436,64 @@ export function updateRaceDetailsDisplay() {
   `;
 }
 
+async function openRaceModeEditModal(race) {
+  const { apiRequest, fetchRaces, render } = window.appContext;
+  if (!race || race.status !== 'created') {
+    showToast('Mode can be changed only before race start', 'warning');
+    return;
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = `
+    <div class="dark-modal-overlay" style="display:flex;">
+      <div class="dark-modal" style="max-width: 460px;">
+        <div class="dark-modal-header">
+          <h2 style="margin:0;">Edit RFID Mode</h2>
+          <button class="dark-modal-close" data-action="close">&times;</button>
+        </div>
+        <div style="margin-top: 16px;">
+          <label style="display:block; color:#cbd5e1; margin-bottom:8px;">Placement Mode</label>
+          <select id="race-mode-select" style="width:100%; padding:10px; background:#0f172a; border:1px solid #334155; color:#e2e8f0; border-radius:6px;">
+            <option value="mid_end_reader_diff">Mid + End readers (reader differentiation)</option>
+            <option value="end_intersection">Dual End antennas (intersection, no mid check)</option>
+          </select>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:18px;">
+          <button class="dark-btn-secondary" data-action="cancel">Cancel</button>
+          <button class="dark-btn-primary" data-action="save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(wrapper);
+  const overlay = wrapper.querySelector('.dark-modal-overlay');
+  const select = wrapper.querySelector('#race-mode-select');
+  const close = () => wrapper.remove();
+  if (select) select.value = race.rfid_placement_mode || 'mid_end_reader_diff';
+
+  wrapper.querySelector('[data-action="close"]')?.addEventListener('click', close);
+  wrapper.querySelector('[data-action="cancel"]')?.addEventListener('click', close);
+  overlay?.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  wrapper.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
+    const mode = select?.value || 'mid_end_reader_diff';
+    try {
+      await apiRequest(`/race/${race.id}`, {
+        method: 'PATCH',
+        body: { rfid_placement_mode: mode },
+      });
+      showToast('RFID mode updated', 'success');
+      close();
+      await fetchRaces();
+      render();
+    } catch (e) {
+      const codeTag = e.error_code ? ` [${e.error_code}]` : '';
+      showToast(`Failed to update mode${codeTag}: ${e.message}`, 'error');
+    }
+  });
+}
+
 // ============================================================================
 // RACE START - RACE SELECTION
 // ============================================================================
@@ -423,7 +530,7 @@ export async function loadRaceStartRaces() {
     }
   } catch (e) {
     console.error('[RaceStart] Failed to load races:', e);
-    showRaceStartStatusMessage('Failed to load races', 'error');
+    showRaceStartStatusMessage(`Failed to load races: ${e.message}`, 'error');
   }
 }
 
@@ -519,10 +626,38 @@ export async function handleRaceStartSubmit(event) {
 
     console.debug(`[RaceStart] Start times selected: ${selectedTimes.join(', ')}`);
 
-    // Combine date and time into ISO string
-    const datePart = scheduledDateIso
-      ? new Date(scheduledDateIso).toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0];
+    // Combine date and time into ISO string without UTC date shifting.
+    // Using toISOString() on a local-midnight date can move it to previous UTC date.
+    const resolveDatePart = (value) => {
+      if (!value) {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+
+      // Prefer raw date portion from backend string if present.
+      const raw = String(value).trim();
+      const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (match && match[1]) return match[1];
+
+      const dt = new Date(raw);
+      if (!Number.isNaN(dt.getTime())) {
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, '0');
+        const d = String(dt.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+
+    const datePart = resolveDatePart(scheduledDateIso);
     const startTimesIso = selectedTimes.map(timeValue => {
       const dateTime = new Date(`${datePart}T${timeValue}:00`);
       return dateTime.toISOString();
@@ -548,7 +683,10 @@ export async function handleRaceStartSubmit(event) {
         console.debug('[RaceStart] Sending start signal to API');
         // Activate the race
         await apiRequest(`/race/${window.appContext.raceStartSelectedRaceId}/start`, {
-          method: 'POST'
+          method: 'POST',
+          body: {
+            scheduled_date: startTimesIso[0],
+          }
         });
         
         // Refresh races and re-render to update button state
@@ -574,7 +712,9 @@ export async function handleRaceStartSubmit(event) {
       startRaceDataPolling();
     } catch (e) {
       console.error('[RaceStart] Failed to start race:', e);
-      showRaceStartStatusMessage(`Failed to start race: ${e.message}`, 'error');
+      const codeTag = e.error_code ? ` [${e.error_code}]` : '';
+      showToast(`Failed to start race${codeTag}: ${e.message}`, 'error');
+      showRaceStartStatusMessage(`Failed to start race${codeTag}: ${e.message}`, 'error');
     }
   });
 }
@@ -637,6 +777,15 @@ export async function attachRaceStartHandlers() {
   const startForm = document.getElementById('start-race-form');
   if (startForm) {
     startForm.addEventListener('submit', handleRaceStartSubmit);
+  }
+
+  const editModeBtn = document.getElementById('edit-race-mode-btn');
+  if (editModeBtn) {
+    editModeBtn.addEventListener('click', async () => {
+      const { state, raceStartSelectedRaceId } = window.appContext;
+      const selectedRace = state.races.find(r => r.id === raceStartSelectedRaceId);
+      await openRaceModeEditModal(selectedRace);
+    });
   }
 }
 

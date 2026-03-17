@@ -68,6 +68,8 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
   const remarksFilter = options.remarksFilter || '';
 
   const selectedRace = races.find(r => String(r.id) === String(selectedRaceId));
+  const selectedRaceMode = selectedRace?.rfid_placement_mode || 'end_intersection';
+  const requiresMidPoint = selectedRaceMode !== 'end_intersection';
 
   // Filter participants for selected race
   let filteredParticipants = selectedRaceId
@@ -203,7 +205,9 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
   }
 
   function getRemarks(race, age, durationMs, midTime) {
-    if (!midTime) return 'fail';
+    const raceMode = race?.rfid_placement_mode || 'end_intersection';
+    const needsMid = raceMode !== 'end_intersection';
+    if (needsMid && !midTime) return 'fail';
     if (!race || durationMs === null || durationMs === undefined || !age) return 'fail';
     const durationSec = durationMs / 1000;
     const config = getRaceCategoryConfig(race);
@@ -345,7 +349,7 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
                       <th style="padding: 14px 16px; text-align: left; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Name <button class="scoreboard-sort-toggle" data-key="name" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                       <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Age <button class="scoreboard-sort-toggle" data-key="age" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                       <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Start Time <button class="scoreboard-sort-toggle" data-key="startTime" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
-                      <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Mid Time <button class="scoreboard-sort-toggle" data-key="midTime" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
+                      ${requiresMidPoint ? '<th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Mid Time <button class="scoreboard-sort-toggle" data-key="midTime" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>' : ''}
                       <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">End Time <button class="scoreboard-sort-toggle" data-key="endTime" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                       <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">⏱️ Duration <button class="scoreboard-sort-toggle" data-key="durationMs" style="margin-left:8px;background:transparent;border:none;color:#94a3b8;cursor:pointer">⇅</button></th>
                       <th style="padding: 14px 16px; text-align: center; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Remarks</th>
@@ -372,7 +376,7 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
                           <td style="padding: 16px; color: #e2e8f0; font-size: 15px; font-weight: ${isTop3 ? '600' : '500'};">${displayName}</td>
                           <td style="padding: 16px; text-align: center; color: #cbd5e1; font-size: 14px;">${p.age ?? 'N/A'}</td>
                           <td style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">${p.startTime ? new Date(p.startTime).toLocaleTimeString() : 'N/A'}</td>
-                          <td style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">${p.midTime ? new Date(p.midTime).toLocaleTimeString() : 'N/A'}</td>
+                          ${requiresMidPoint ? `<td style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">${p.midTime ? new Date(p.midTime).toLocaleTimeString() : 'N/A'}</td>` : ''}
                           <td style="padding: 16px; text-align: center; color: #94a3b8; font-size: 13px;">${p.endTime ? new Date(p.endTime).toLocaleTimeString() : 'N/A'}</td>
                           <td style="padding: 16px; text-align: center; color: ${isTop3 ? medalColor : '#22c55e'}; font-size: ${isTop3 ? '16px' : '15px'}; font-weight: ${isTop3 ? '700' : '600'}; font-family: monospace;">
                             ${p.formattedDuration}
