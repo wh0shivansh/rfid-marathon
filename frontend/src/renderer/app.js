@@ -168,6 +168,20 @@ function getRaceCategoryConfig(category) {
   return RACE_CATEGORY_CONFIG[category] || RACE_CATEGORY_CONFIG.BPET;
 }
 
+function formatRaceLabel(race) {
+  if (!race) return '';
+  const raceName = String(race.name || '').trim() || 'Unnamed Race';
+  const rawDate = race.scheduled_date;
+  const parsedDate = rawDate ? new Date(rawDate) : null;
+  const dateText = parsedDate && !Number.isNaN(parsedDate.getTime())
+    ? parsedDate.toLocaleDateString()
+    : 'No Date';
+  const locationText = String(race.location || '').trim();
+  return locationText
+    ? `${raceName} - ${locationText} (${dateText})`
+    : `${raceName} (${dateText})`;
+}
+
 // Per-race RFID deduplication map: raceId -> Set(rfid)
 const perRaceRFIDMap = new Map();
 
@@ -239,6 +253,7 @@ function setupAppContext() {
     fetchParticipants,
     registerRunner,
     getRaceCategoryConfig,
+    formatRaceLabel,
     
     // RFID Management
     getSelectedRaceId,
@@ -645,6 +660,18 @@ async function render() {
     btn.addEventListener("click", async (e) => {
       const newView = e.target.dataset.view;
 
+      // Create view setup needs DOM nodes (copy-from dropdown), so render first.
+      if (newView === 'create') {
+        state.view = newView;
+        render();
+        try {
+          await setupCreateRaceView();
+        } catch (err) {
+          console.error(`Failed to setup ${newView} view:`, err);
+        }
+        return;
+      }
+
       // Call view-specific setup functions
       try {
         if (newView === 'register') {
@@ -658,8 +685,6 @@ async function render() {
           await setupCandidateManagementView();
         } else if (newView === 'scoreboard') {
           await setupScoreboardView();
-        } else if (newView === 'create') {
-          await setupCreateRaceView();
         } else if (newView === 'races-management') {
           await setupRacesManagementView();
         }

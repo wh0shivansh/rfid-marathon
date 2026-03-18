@@ -1,6 +1,6 @@
 # Build a standalone Windows .exe for UDP server
 # Usage (from PowerShell):
-#   Set-Location e:\Innogative\udp-marathon\udp_server
+#   Set-Location udp_server
 #   .\build_udp_server.ps1
 
 $ErrorActionPreference = "Stop"

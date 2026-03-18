@@ -114,7 +114,21 @@ RFID_NO_HIT_TIMEOUT_SECONDS: Final[int] = int(os.getenv("RFID_NO_HIT_TIMEOUT_SEC
 # ============================================================================
 
 BULK_HEADERS = ["s.no", "army number", "rank", "name", "age", "remarks"]
-RFID_PREFIX = "315354010100000000000" # Last 3 digits are incremented for each participant in bulk upload
+BULK_OPTIONAL_HEADERS = ["rfid"]
+
+# RFID tag validation
+RFID_TAG_MIN_LENGTH: Final[int] = 3
+RFID_TAG_MAX_LENGTH: Final[int] = 32
+RFID_TAG_PATTERN: Final[str] = r"^[A-Fa-f0-9]+$"  # Hexadecimal only
+
+
+# 2130-2200
+# Default values for per-race RFID auto-allocation settings.
+# Bulk rows without explicit RFID are assigned using:
+# <race.rfid_prefix><sequence zero-padded to race.rfid_suffix_digits>
+RFID_DEFAULT_PREFIX: Final[str] = os.getenv("RFID_DEFAULT_PREFIX", "315354010100000000000").upper()
+RFID_DEFAULT_SUFFIX_DIGITS: Final[int] = int(os.getenv("RFID_DEFAULT_SUFFIX_DIGITS", 3))
+RFID_DEFAULT_SUFFIX_START_NUMBER: Final[int] = int(os.getenv("RFID_DEFAULT_SUFFIX_START_NUMBER", 1))
 
 
 # ============================================================================
@@ -192,11 +206,6 @@ RACE_MAX_DISTANCE_METERS: Final[int] = 100000  # 100km max
 # Name validation
 PARTICIPANT_NAME_MIN_LENGTH: Final[int] = 2
 PARTICIPANT_NAME_MAX_LENGTH: Final[int] = 100
-
-# RFID tag validation
-RFID_TAG_MIN_LENGTH: Final[int] = 8
-RFID_TAG_MAX_LENGTH: Final[int] = 32
-RFID_TAG_PATTERN: Final[str] = r"^[A-Fa-f0-9]+$"  # Hexadecimal only
 
 # ============================================================================
 # AUDIT LOG CONSTANTS
@@ -322,7 +331,6 @@ class EnvVars:
     # Server
     SERVER_HOST = "SERVER_HOST"
     SERVER_PORT = "SERVER_PORT"
-    SERVER_ENV = "SERVER_ENV"  # development, production
     
     # SSL/TLS
     SSL_CERT_PATH = "SSL_CERT_PATH"

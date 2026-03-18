@@ -1,4 +1,5 @@
 import { showToast } from '../utils/Toasts.js';
+import { setupCreateRaceView } from './CreateRace.js';
 
 // ============================================================================
 // RACES MANAGEMENT - API OPERATIONS
@@ -145,24 +146,24 @@ export function openRaceEditModal(race) {
                   <input type="date" data-field="scheduled_date" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
                 </div>
               </div>
-
-              <div class="dark-form-group">
-                <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-                  <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📍 Location</span>
-                  <span style="color: #ef4444; font-weight: 700;">*</span>
-                </label>
-                <input type="text" data-field="location" required style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
-              </div>
-
+              
               <div class="dark-form-group">
                 <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
                   <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📡 RFID Placement Mode</span>
                 </label>
                 <select data-field="rfid_placement_mode" ${canEditMode ? '' : 'disabled'} style="padding: 12px 14px; font-size: 14px; border-radius: 6px; border: 2px solid #334155; width:100%; background: #0f172a; color: #e2e8f0;">
-                  <option value="mid_end_reader_diff">Mid + End readers (reader differentiation)</option>
                   <option value="end_intersection">Dual End antennas (intersection, no mid check)</option>
+                  <option value="mid_end_reader_diff">Mid + End readers (reader differentiation)</option>
                 </select>
                 ${canEditMode ? '' : '<div style="margin-top: 6px; color: #94a3b8; font-size: 12px;">Mode can be changed only before race start.</div>'}
+              </div>
+
+              <div class="dark-form-group">
+                <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                  <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📍 Location</span>
+                  <span style="color: #64748b; font-size: 12px; font-weight: 400;">(optional)</span>
+                </label>
+                <input type="text" data-field="location" style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
               </div>
             </div>
           </div>
@@ -220,7 +221,7 @@ export function openRaceEditModal(race) {
       const updates = {
         name: nameEl.value.trim(),
         distance_meters: Number(distanceEl.value),
-        location: locationEl.value.trim(),
+        location: locationEl.value.trim() || undefined,
         scheduled_date: scheduledEl.value,
         description: descriptionEl.value.trim(),
       };
@@ -246,6 +247,11 @@ export function attachRacesManagementHandlers() {
       state.showRaceModal = false;
       await fetchRaces();
       render();
+      try {
+        await setupCreateRaceView();
+      } catch (err) {
+        console.error('Failed to setup create race view', err);
+      }
     });
   }
 

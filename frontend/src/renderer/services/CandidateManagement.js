@@ -69,9 +69,10 @@ export function openCandidateEditModal(participant) {
   if (!participant) return;
 
   const modalContainer = document.createElement('div');
+  const formatRaceLabel = window.appContext?.formatRaceLabel || ((race) => String(race?.name || ''));
   const raceOptions = state.races
     .filter(r => r.status === 'created')
-    .map(r => `<option value="${r.id}">${r.name} - ${r.location} (${new Date(r.scheduled_date).toLocaleDateString()})</option>`)
+    .map(r => `<option value="${r.id}">${formatRaceLabel(r)}</option>`)
     .join('');
 
   modalContainer.innerHTML = `
@@ -99,7 +100,7 @@ export function openCandidateEditModal(participant) {
             <div class="dark-form-group">
               <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
                 <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📅 Age</span>
-                <span style="color: #64748b; font-size: 12px; font-weight: 400;">(optional)</span>
+                <span style="color: #ef4444; font-weight: 700;">*</span>
               </label>
               <input type="number" id="candidate-age" style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
             </div>

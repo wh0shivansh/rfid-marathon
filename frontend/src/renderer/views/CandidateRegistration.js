@@ -1,4 +1,6 @@
 export function renderRegistration(currentStep, scannedRFID, availableRaces, selectedRace, todayRegistrations = []) {
+  const formatRaceLabel = window.appContext?.formatRaceLabel || ((race) => String(race?.name || ''));
+
   // Filter only races with status 'created'
   const createdRaces = availableRaces.filter(r => r.status === 'created');
   
@@ -17,7 +19,7 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
               <select id="race-select-dropdown" style="width: 100%; padding: 12px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 1em; cursor: pointer;">
                 <option value="">-- Select a race --</option>
                 ${createdRaces.map(race => `
-                  <option value="${race.id}" ${selectedRace === race.id ? 'selected' : ''}>${race.name} - ${race.distance_meters}m - (${new Date(race.scheduled_date).toLocaleDateString()})</option>
+                  <option value="${race.id}" ${selectedRace === race.id ? 'selected' : ''}>${formatRaceLabel(race)} - ${race.distance_meters}m</option>
                 `).join('')}
               </select>
               <button id="continue-step1" style="margin-top: 16px; width: 100%; padding: 12px 16px; background: #3b82f6; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 1em; font-weight: 600;">Continue to RFID Scan →</button>
@@ -47,6 +49,9 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
               </button>
               <button id="back-to-step-1" style="padding: 12px 24px; background: #475569; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 1em;">← Back</button>
             </div>
+            <div style="margin-top: 12px; color: #94a3b8; font-size: 12px;">
+              Bulk file can include optional <strong>rfid</strong> column. Provided RFID values are used as-is; blank RFID cells are auto-assigned using this race's prefix and suffix-digit settings.
+            </div>
           </div>
         </div>
       </div>
@@ -63,7 +68,7 @@ export function renderRegistration(currentStep, scannedRFID, availableRaces, sel
               <div style="font-size: 0.85em; color: #94a3b8; margin-bottom: 4px;">SELECTED RACE</div>
               <div id="race-info-step3" style="font-size: 1.05em; font-weight: 600; color: #e2e8f0;">${selectedRace ? (() => {
                 const race = createdRaces.find(r => r.id === selectedRace);
-                return race ? `${race.name} - ${race.location} (${new Date(race.scheduled_date).toLocaleDateString()}) - ${race.distance_meters}m` : 'Unknown Race';
+                return race ? `${formatRaceLabel(race)} - ${race.distance_meters}m` : 'Unknown Race';
               })() : ''}</div>
             </div>
             

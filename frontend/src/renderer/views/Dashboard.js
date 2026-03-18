@@ -1,4 +1,9 @@
 export function renderDashboard(races = [], registrations = 0, totalParticipants = 0, startedToday = 0, finishedToday = 0, raceStats = {}) {
+  const formatLocation = (value) => {
+    const location = String(value || '').trim();
+    return location || '-';
+  };
+
   const cards = [
     { label: "Races", value: races.length || "--" },
     { label: "Total Participants", value: totalParticipants || "--" },
@@ -13,7 +18,7 @@ export function renderDashboard(races = [], registrations = 0, totalParticipants
       <tr>
         <td>${r.name}</td>
         <td>${r.distance_meters} m</td>
-        <td>${r.location}</td>
+        <td>${formatLocation(r.location)}</td>
         <td>${new Date(r.scheduled_date).toLocaleDateString('en-GB')}</td>
         <td>${raceStats[r.id] || 0}</td>
       </tr>`

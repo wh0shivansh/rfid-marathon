@@ -9,17 +9,28 @@ import socket
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
+from enum import Enum
+
+class ServiceType(str, Enum):
+    """Enumeration of service types"""
+    ACTIVE = "active"
+    DISABLED = "disabled"
+    HIDDEN = "hidden"
+    OTHER = "other"
 
 DEFAULT_CONFIG = {
     "services": [
-        {"name": "marathon-ui", "path": "marathon-win32-x64/marathon.exe"},
-        {"name": "rfid-backend", "path": "rfid-backend/rfid-backend.exe"},
-        {"name": "rfid-listener", "path": "rfid-listener/rfid-listener.exe"},
-        {"name": "udp-listener", "path": "udp-listener/udp-listener.exe"},
-        {"name": "udp-sender", "path": "udp-sender/udp-sender.exe"},
-        {"name": "tag-web-server", "path": "tag_web_server/tag_server_20230711.exe"},
+        {"name": "database", "path": "", "type": ServiceType.ACTIVE},
+        {"name": "rfid-backend", "path": "rfid-backend/rfid-backend.exe", "type": ServiceType.ACTIVE},
+        {"name": "rfid-listener", "path": "rfid-listener/rfid-listener.exe", "type": ServiceType.ACTIVE},
+        {"name": "marathon-ui", "path": "marathon-win32-x64/marathon.exe", "type": ServiceType.ACTIVE},
+        {"name": "udp-listener", "path": "udp-listener/udp-listener.exe", "type": ServiceType.DISABLED},
+        {"name": "udp-sender", "path": "udp-sender/udp-sender.exe", "type": ServiceType.DISABLED},
+        {"name": "tag-web-server", "path": "tag_web_server/tag_server_20230711.exe", "type": ServiceType.OTHER},
     ]
 }
+
+DEFAULT_SERVICE_ORDER = [svc["name"] for svc in DEFAULT_CONFIG["services"]]
 
 
 def resolve_runtime_root() -> Path:
@@ -48,10 +59,28 @@ def load_config(config_path: Path) -> dict:
 
 
 def normalize_services(services: list[dict]) -> list[dict]:
+    def parse_service_type(raw_type: object) -> ServiceType:
+        if isinstance(raw_type, ServiceType):
+            return raw_type
+        if isinstance(raw_type, str):
+            try:
+                return ServiceType(raw_type.strip().lower())
+            except ValueError:
+                return ServiceType.HIDDEN
+        return ServiceType.HIDDEN
+
     normalized = []
     for svc in services:
         if isinstance(svc, str):
-            normalized.append({"name": svc, "path": svc})
+            normalized.append(
+                {
+                    "name": svc,
+                    "path": svc,
+                    "args": [],
+                    "cwd": None,
+                    "type": ServiceType.ACTIVE,
+                }
+            )
             continue
         name = svc.get("name") or svc.get("path") or "service"
         normalized.append(
@@ -60,6 +89,7 @@ def normalize_services(services: list[dict]) -> list[dict]:
                 "path": svc.get("path", ""),
                 "args": svc.get("args", []),
                 "cwd": svc.get("cwd"),
+                "type": parse_service_type(svc.get("type", ServiceType.ACTIVE)),
             }
         )
     return normalized
@@ -78,7 +108,15 @@ class ControlHubUI:
         # Ensure `database` appears as a managed service so it shows up in
         # service lists and Start/Stop All flows.
         if not any(svc.get("name") == "database" for svc in self.services):
-            self.services.append({"name": "database", "path": ""})
+            self.services.append(
+                {
+                    "name": "database",
+                    "path": "",
+                    "args": [],
+                    "cwd": None,
+                    "type": ServiceType.ACTIVE,
+                }
+            )
         self.service_map = {svc["name"]: svc for svc in self.services}
         self.display_services = self._build_display_services()
 
@@ -107,24 +145,28 @@ class ControlHubUI:
         self._schedule_log_pump()
 
     def _build_display_services(self) -> list[dict]:
-        preferred_order = [
-            "marathon-ui",
-            "rfid-backend",
-            "rfid-listener",
-            "udp-listener",
-            "udp-sender",
-        ]
-        ordered = []
-        seen = set()
-        for name in preferred_order:
-            svc = self.service_map.get(name)
-            if svc:
-                ordered.append(svc)
-                seen.add(name)
-        for svc in self.services:
-            if svc["name"] not in seen:
-                ordered.append(svc)
-        return ordered
+        ordered = self._services_in_priority_order(include_hidden=False)
+        return [svc for svc in ordered if svc.get("type") != ServiceType.HIDDEN]
+
+    def _services_in_priority_order(self, include_hidden: bool) -> list[dict]:
+        priority = {name: i for i, name in enumerate(DEFAULT_SERVICE_ORDER)}
+        indexed = []
+        for idx, svc in enumerate(self.services):
+            if not include_hidden and svc.get("type") == ServiceType.HIDDEN:
+                continue
+            indexed.append((idx, svc))
+        indexed.sort(
+            key=lambda item: (
+                priority.get(item[1]["name"], len(priority) + item[0]),
+                item[0],
+            )
+        )
+        return [svc for _, svc in indexed]
+
+    def _is_active_service(self, svc: dict | None) -> bool:
+        if not svc:
+            return False
+        return svc.get("type") == ServiceType.ACTIVE
 
     def _build_ui(self) -> None:
         self.root.title("RFID Marathon Control Hub")
@@ -140,10 +182,10 @@ class ControlHubUI:
         ttk.Button(top_frame, text="Clear All Logs", command=self.clear_all_logs).pack(
             side=tk.RIGHT, padx=4
         )
-        ttk.Button(top_frame, text="Start All", command=self.start_all).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(top_frame, text="Stop All", command=self.stop_all).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(top_frame, text="Restart All", command=self.restart_all).pack(side=tk.RIGHT, padx=4)
         ttk.Button(top_frame, text="Status", command=self.show_status).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(top_frame, text="Restart All", command=self.restart_all).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(top_frame, text="Stop All", command=self.stop_all).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(top_frame, text="Start All", command=self.start_all).pack(side=tk.RIGHT, padx=4)
 
         main_frame = ttk.Frame(self.root, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -346,15 +388,19 @@ class ControlHubUI:
             command=self.toggle_endline_group,
         ).pack(anchor=tk.W)
 
-        # Database service checkbox (indented under End Line)
-        ttk.Checkbutton(
-            services_frame,
-            text="Database (local)",
-            variable=db_var,
-            command=lambda: self.toggle_service("database"),
-        ).pack(anchor=tk.W, pady=(6, 8), padx=(18, 0))
-        # register as a service var so other code can read it
-        self.service_vars["database"] = db_var
+        db_svc = self.service_map.get("database")
+        if db_svc and db_svc.get("type") != ServiceType.HIDDEN:
+            db_cb = ttk.Checkbutton(
+                services_frame,
+                text="Database (local)",
+                variable=db_var,
+                command=lambda: self.toggle_service("database"),
+            )
+            db_cb.pack(anchor=tk.W, pady=(6, 8), padx=(18, 0))
+            if db_svc.get("type") == ServiceType.DISABLED:
+                db_cb.state(["disabled"])
+            # register as a service var so other code can read it
+            self.service_vars["database"] = db_var
 
         self._add_service_checkbox(services_frame, "rfid-backend", "backend server", indent=True)
         self._add_service_checkbox(
@@ -417,30 +463,41 @@ class ControlHubUI:
             variable=var,
             command=lambda s=service_name: self.toggle_service(s),
         )
+        if svc.get("type") == ServiceType.DISABLED:
+            cb.state(["disabled"])
         pad = (18, 0) if indent else (0, 0)
         cb.pack(anchor=tk.W, pady=2, padx=pad)
 
     def toggle_frontend_group(self) -> None:
         is_on = self.group_vars["frontend"].get()
         if is_on:
-            self.service_vars.get("rfid-backend", tk.BooleanVar()).set(True)
-            self.start_service("rfid-backend")
-            self.service_vars.get("marathon-ui", tk.BooleanVar()).set(True)
-            self.start_service("marathon-ui")
+            backend_svc = self._find_service("rfid-backend")
+            frontend_svc = self._find_service("marathon-ui")
+            if self._is_active_service(backend_svc):
+                self.service_vars.get("rfid-backend", tk.BooleanVar()).set(True)
+                self.start_service("rfid-backend")
+            if self._is_active_service(frontend_svc):
+                self.service_vars.get("marathon-ui", tk.BooleanVar()).set(True)
+                self.start_service("marathon-ui")
         else:
             self.service_vars.get("marathon-ui", tk.BooleanVar()).set(False)
             self.stop_service("marathon-ui")
 
     def toggle_endline_group(self) -> None:
         is_on = self.group_vars["endline"].get()
-        targets = ["rfid-backend", "rfid-listener", "udp-listener"]
+        # End Line should bring up local DB first, then backend, then listeners.
+        targets = [
+            name
+            for name in ["database", "rfid-backend", "rfid-listener", "udp-listener"]
+            if self._is_active_service(self._find_service(name))
+        ]
 
         if is_on:
             for name in targets:
                 self.service_vars.get(name, tk.BooleanVar()).set(True)
                 self.start_service(name)
         else:
-            for name in targets:
+            for name in reversed(targets):
                 self.service_vars.get(name, tk.BooleanVar()).set(False)
                 self.stop_service(name)
 
@@ -518,6 +575,15 @@ class ControlHubUI:
         svc = self._find_service(service)
         if not svc:
             self._append_status(f"Unknown service: {service}\n")
+            return
+        svc_type = svc.get("type")
+        if svc_type == ServiceType.HIDDEN:
+            return
+        if svc_type == ServiceType.DISABLED:
+            self._append_status(f"{service} is disabled and cannot be started.\n")
+            if service in self.service_vars:
+                self.service_vars[service].set(False)
+            self._sync_group_vars()
             return
         if service == "database":
             # Start the bundled DB setup asynchronously and reflect outcome
@@ -762,6 +828,18 @@ class ControlHubUI:
         self._append_status(f"Restarted {service}.\n")
 
     def toggle_service(self, service: str) -> None:
+        svc = self._find_service(service)
+        if not svc:
+            self._append_status(f"Unknown service: {service}\n")
+            return
+        svc_type = svc.get("type")
+        if svc_type == ServiceType.HIDDEN:
+            return
+        if svc_type == ServiceType.DISABLED:
+            self.service_vars.get(service, tk.BooleanVar()).set(False)
+            self._append_status(f"{service} is disabled and cannot be started.\n")
+            self._sync_group_vars()
+            return
         if self.service_vars[service].get():
             self.start_service(service)
             if service in self.log_tab_index:
@@ -771,22 +849,36 @@ class ControlHubUI:
         self._sync_group_vars()
 
     def start_all(self) -> None:
-        for svc in self.display_services:
+        for svc in self._services_in_priority_order(include_hidden=False):
             name = svc["name"]
-            self.service_vars[name].set(True)
+            if svc.get("type") != ServiceType.ACTIVE:
+                continue
+            if name in self.service_vars:
+                self.service_vars[name].set(True)
             self.start_service(name)
         self._sync_group_vars()
 
     def stop_all(self) -> None:
-        for svc in self.services:
+        for svc in self._services_in_priority_order(include_hidden=False):
             name = svc["name"]
-            self.service_vars[name].set(False)
+            if svc.get("type") != ServiceType.ACTIVE:
+                continue
+            if name in self.service_vars:
+                self.service_vars[name].set(False)
+            self.stop_service(name)
+        self._sync_group_vars()
+
+    def _stop_all_services(self, include_hidden: bool) -> None:
+        for svc in self._services_in_priority_order(include_hidden=include_hidden):
+            name = svc["name"]
+            if name in self.service_vars:
+                self.service_vars[name].set(False)
             self.stop_service(name)
         self._sync_group_vars()
 
     def on_close(self) -> None:
         self._append_status("Shutting down services...\n")
-        self.stop_all()
+        self._stop_all_services(include_hidden=True)
         self.root.destroy()
 
     def restart_all(self) -> None:
@@ -858,8 +950,22 @@ class ControlHubUI:
                 except Exception:
                     pass
 
-                # If a DB is already accepting connections, don't run setup.
-                if not self._wait_for_db_ready(db_host, db_port, timeout_seconds=1.0):
+                # If a DB setup process is already running (for example from the
+                # dedicated Database service), wait for readiness instead of
+                # launching a second setup process.
+                active_db_setup = self.db_setup_proc is not None and self.db_setup_proc.poll() is None
+                if active_db_setup:
+                    self._append_status("[debug] Database setup already running; waiting for DB readiness.\n")
+                    if not self._wait_for_db_ready(db_host, db_port, timeout_seconds=60.0):
+                        self.backend_start_failed = True
+                        self.service_vars.get("rfid-backend", tk.BooleanVar()).set(False)
+                        self._append_status("Database setup did not become ready in time.\n")
+                        self._sync_group_vars()
+                        self.backend_start_event.set()
+                        return
+                # If a DB is not accepting connections and no setup is active,
+                # run the bundled setup now.
+                elif not self._wait_for_db_ready(db_host, db_port, timeout_seconds=1.0):
                     exit_code = self._run_database_setup()
                     self._append_status(f"[debug] build_database.ps1 returned exit_code={exit_code}\n")
                     if exit_code != 0:
@@ -1057,7 +1163,11 @@ class ControlHubUI:
         return False
 
     def _sync_group_vars(self) -> None:
-        endline_targets = ["rfid-backend", "rfid-listener", "udp-listener"]
+        endline_targets = [
+            name
+            for name in ["database", "rfid-backend", "rfid-listener", "udp-listener"]
+            if self._is_active_service(self._find_service(name))
+        ]
         endline_on = all(self.service_vars.get(name, tk.BooleanVar()).get() for name in endline_targets)
         frontend_on = self.service_vars.get("marathon-ui", tk.BooleanVar()).get()
 

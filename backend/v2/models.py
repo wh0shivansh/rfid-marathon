@@ -25,6 +25,9 @@ from constants import (
     PARTICIPANT_NAME_MAX_LENGTH,
     RFID_TAG_MIN_LENGTH,
     RFID_TAG_MAX_LENGTH,
+    RFID_DEFAULT_PREFIX,
+    RFID_DEFAULT_SUFFIX_DIGITS,
+    RFID_DEFAULT_SUFFIX_START_NUMBER,
     RaceStatus,
     RaceCategory,
     RaceRFIDMode,
@@ -121,12 +124,15 @@ class RaceCreateRequest(BaseModel):
     """Create race request schema"""
     name: str = Field(..., min_length=3, max_length=200)
     distance_meters: int = Field(..., ge=10, le=100000)
-    location: str = Field(..., min_length=3, max_length=200)
+    location: Optional[str] = Field(None, max_length=200)
     scheduled_date: str = Field(..., description="ISO 8601 date")
     description: Optional[str] = Field(None, max_length=1000)
     copy_from_race_id: Optional[str] = Field(None, description="Optional race ID to copy participants from")
     race_category: RaceCategory = Field(RaceCategory.BPET)
     rfid_placement_mode: RaceRFIDMode = Field(RaceRFIDMode.MID_END_READER_DIFF)
+    rfid_prefix: str = Field(RFID_DEFAULT_PREFIX, min_length=1, max_length=RFID_TAG_MAX_LENGTH)
+    rfid_suffix_digits: int = Field(RFID_DEFAULT_SUFFIX_DIGITS, ge=1, le=12)
+    rfid_suffix_start_number: int = Field(RFID_DEFAULT_SUFFIX_START_NUMBER, ge=0)
     # Qualifying times (seconds) stored as per-age lists
     bpet_age_upto30: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_upto30"].copy())
     bpet_age_upto40: List[float] = Field(default_factory=lambda: _QUALIFYING_DEFAULTS["bpet_age_upto40"].copy())
@@ -149,17 +155,49 @@ class RaceCreateRequest(BaseModel):
             return v
         return _validate_qualifying_list(v, field_name)
 
+    @validator("rfid_prefix")
+    def validate_rfid_prefix(cls, v):
+        normalized = str(v).strip().upper()
+        if not validate_rfid_tag(normalized):
+            raise ValueError("rfid_prefix must be hexadecimal")
+        return normalized
+
+    @validator("rfid_suffix_digits")
+    def validate_rfid_suffix_digits(cls, v, values):
+        prefix = values.get("rfid_prefix", RFID_DEFAULT_PREFIX)
+        if len(prefix) + int(v) > RFID_TAG_MAX_LENGTH:
+            raise ValueError(f"rfid_prefix + rfid_suffix_digits must not exceed {RFID_TAG_MAX_LENGTH} characters")
+        return int(v)
+
+    @validator("rfid_suffix_start_number")
+    def validate_rfid_suffix_start_number(cls, v, values):
+        suffix_digits = int(values.get("rfid_suffix_digits", RFID_DEFAULT_SUFFIX_DIGITS))
+        max_seq = (10 ** suffix_digits) - 1
+        if int(v) < 0 or int(v) > max_seq:
+            raise ValueError(f"rfid_suffix_start_number must be between 0 and {max_seq}")
+        return int(v)
+
+    @validator("location", pre=True, always=True)
+    def normalize_create_location(cls, v):
+        if v is None:
+            return None
+        normalized = str(v).strip()
+        return normalized if normalized else None
+
 
 class RaceUpdateRequest(BaseModel):
     """Update race request schema"""
     name: Optional[str] = Field(None, min_length=3, max_length=200)
     distance_meters: Optional[int] = Field(None, ge=10, le=100000)
-    location: Optional[str] = Field(None, min_length=3, max_length=200)
+    location: Optional[str] = Field(None, max_length=200)
     scheduled_date: Optional[str] = None
     description: Optional[str] = Field(None, max_length=1000)
     status: Optional[RaceStatus] = None
     race_category: Optional[RaceCategory] = None
     rfid_placement_mode: Optional[RaceRFIDMode] = None
+    rfid_prefix: Optional[str] = Field(None, min_length=1, max_length=RFID_TAG_MAX_LENGTH)
+    rfid_suffix_digits: Optional[int] = Field(None, ge=1, le=12)
+    rfid_suffix_start_number: Optional[int] = Field(None, ge=0)
     bpet_age_upto30: Optional[List[float]] = None
     bpet_age_upto40: Optional[List[float]] = None
     bpet_age_40_45: Optional[List[float]] = None
@@ -183,18 +221,37 @@ class RaceUpdateRequest(BaseModel):
             return v
         return _validate_qualifying_list(v, field_name)
 
+    @validator("rfid_prefix")
+    def validate_update_rfid_prefix(cls, v):
+        if v is None:
+            return None
+        normalized = str(v).strip().upper()
+        if not validate_rfid_tag(normalized):
+            raise ValueError("rfid_prefix must be hexadecimal")
+        return normalized
+
+    @validator("location", pre=True)
+    def normalize_update_location(cls, v):
+        if v is None:
+            return None
+        normalized = str(v).strip()
+        return normalized if normalized else None
+
 
 class RaceResponse(BaseModel):
     """Race response schema"""
     id: str
     name: str
     distance_meters: int
-    location: str
+    location: Optional[str]
     scheduled_date: datetime
     description: Optional[str]
     status: RaceStatus
     race_category: RaceCategory
     rfid_placement_mode: RaceRFIDMode
+    rfid_prefix: str
+    rfid_suffix_digits: int
+    rfid_suffix_start_number: int
     created_at: datetime
     updated_at: datetime
     table_name: str
@@ -469,13 +526,16 @@ class Race(Base):
     id = Column(UUID(as_uuid=False), primary_key=True, default=generate_uuid)
     name = Column(String(200), nullable=False)
     distance_meters = Column(Integer, nullable=False)
-    location = Column(String(200), nullable=False)
+    location = Column(String(200), nullable=True)
     scheduled_date = Column(DateTime(timezone=True), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(50), default=RaceStatus.CREATED.value, nullable=False)
     table_name = Column(String(128), nullable=False, unique=True)  # Maps to participants table for this race
     race_category = Column(String(50), nullable=False, default=RaceCategory.BPET.value)  # e.g., 'BPET', 'CPT', 'PPT'
     rfid_placement_mode = Column(String(50), nullable=False, default=RaceRFIDMode.MID_END_READER_DIFF.value)
+    rfid_prefix = Column(String(32), nullable=False, default=RFID_DEFAULT_PREFIX)
+    rfid_suffix_digits = Column(Integer, nullable=False, default=RFID_DEFAULT_SUFFIX_DIGITS)
+    rfid_suffix_start_number = Column(Integer, nullable=False, default=RFID_DEFAULT_SUFFIX_START_NUMBER)
 
     # Qualifying times (seconds) stored as JSONB lists per age group
     bpet_age_upto30 = Column(JSONB, nullable=False, default=lambda: [1500.0, 1578.0, 1620.0])
@@ -507,6 +567,11 @@ class Race(Base):
         CheckConstraint("status IN ('created', 'started', 'completed')", name='check_race_status'),
         CheckConstraint("race_category IN ('BPET', 'CPT', 'PPT')", name='check_race_category'),
         CheckConstraint("rfid_placement_mode IN ('mid_end_reader_diff', 'end_intersection')", name='check_race_rfid_placement_mode'),
+        CheckConstraint("rfid_prefix ~ '^[A-Fa-f0-9]+$'", name='check_race_rfid_prefix_hex'),
+        CheckConstraint("rfid_suffix_digits >= 1 AND rfid_suffix_digits <= 12", name='check_race_rfid_suffix_digits'),
+        CheckConstraint("rfid_suffix_start_number >= 0", name='check_race_rfid_suffix_start_non_negative'),
+        CheckConstraint("rfid_suffix_start_number < power(10, rfid_suffix_digits)", name='check_race_rfid_suffix_start_range'),
+        CheckConstraint("char_length(rfid_prefix) + rfid_suffix_digits <= 32", name='check_race_rfid_tag_length'),
         CheckConstraint("jsonb_typeof(bpet_age_upto30) = 'array' AND jsonb_array_length(bpet_age_upto30) = 3", name='check_bpet_age_upto30_len'),
         CheckConstraint("jsonb_typeof(bpet_age_upto40) = 'array' AND jsonb_array_length(bpet_age_upto40) = 3", name='check_bpet_age_upto40_len'),
         CheckConstraint("jsonb_typeof(bpet_age_40_45) = 'array' AND jsonb_array_length(bpet_age_40_45) = 3", name='check_bpet_age_40_45_len'),

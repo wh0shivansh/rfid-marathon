@@ -25,6 +25,9 @@ from basefunctions import (
     iso8601_to_timestamp,
 )
 from constants import (
+    RFID_DEFAULT_PREFIX,
+    RFID_DEFAULT_SUFFIX_DIGITS,
+    RFID_DEFAULT_SUFFIX_START_NUMBER,
     RaceCategory,
     RaceRFIDMode,
     RaceStatus,
@@ -46,13 +49,16 @@ class RaceService:
         db: Session,
         name: str,
         distance_meters: int,
-        location: str,
+        location: Optional[str],
         scheduled_date_str: str,
         created_by: str,
         copy_from_race_id: Optional[str] = None,
         description: Optional[str] = None,
         race_category: Optional[Union[str, RaceCategory]] = None,
         rfid_placement_mode: Optional[Union[str, RaceRFIDMode]] = None,
+        rfid_prefix: Optional[str] = None,
+        rfid_suffix_digits: Optional[int] = None,
+        rfid_suffix_start_number: Optional[int] = None,
         bpet_age_upto30: Optional[List[float]] = None,
         bpet_age_upto40: Optional[List[float]] = None,
         bpet_age_40_45: Optional[List[float]] = None,
@@ -73,7 +79,7 @@ class RaceService:
             db: Database session
             name: Race name
             distance_meters: Race distance in meters
-            location: Race location
+            location: Optional race location
             scheduled_date_str: ISO 8601 scheduled date
             created_by: User ID who created the race
             description: Optional description
@@ -97,6 +103,28 @@ class RaceService:
             raise ValidationError("Invalid scheduled date format")
         
         try:
+            normalized_location = str(location).strip() if location is not None else None
+            if normalized_location == "":
+                normalized_location = None
+
+            normalized_rfid_prefix = str(rfid_prefix or RFID_DEFAULT_PREFIX).strip().upper()
+            normalized_rfid_suffix_digits = int(rfid_suffix_digits or RFID_DEFAULT_SUFFIX_DIGITS)
+            normalized_rfid_suffix_start_number = int(
+                rfid_suffix_start_number
+                if rfid_suffix_start_number is not None
+                else RFID_DEFAULT_SUFFIX_START_NUMBER
+            )
+
+            if not re.fullmatch(r"[A-Fa-f0-9]+", normalized_rfid_prefix):
+                raise ValidationError("RFID prefix must be hexadecimal")
+            if normalized_rfid_suffix_digits < 1 or normalized_rfid_suffix_digits > 12:
+                raise ValidationError("RFID suffix digits must be between 1 and 12")
+            if len(normalized_rfid_prefix) + normalized_rfid_suffix_digits > 32:
+                raise ValidationError("rfid_prefix + rfid_suffix_digits must not exceed 32 characters")
+            max_seq_value = (10 ** normalized_rfid_suffix_digits) - 1
+            if normalized_rfid_suffix_start_number < 0 or normalized_rfid_suffix_start_number > max_seq_value:
+                raise ValidationError(f"RFID suffix start number must be between 0 and {max_seq_value}")
+
             # Create a deterministic UUIDv5 based on race name + scheduled date
             # This ensures the race ID is stable for the same name+date combination
             name_key = name.strip().lower()
@@ -110,7 +138,7 @@ class RaceService:
                 id=deterministic_uuid,
                 name=name,
                 distance_meters=distance_meters,
-                location=location,
+                location=normalized_location,
                 scheduled_date=scheduled_date,
                 description=description,
                 status=RaceStatus.CREATED.value,
@@ -126,6 +154,9 @@ class RaceService:
                     if isinstance(rfid_placement_mode, RaceRFIDMode)
                     else str(rfid_placement_mode or RaceRFIDMode.END_INTERSECTION.value)
                 ),
+                rfid_prefix=normalized_rfid_prefix,
+                rfid_suffix_digits=normalized_rfid_suffix_digits,
+                rfid_suffix_start_number=normalized_rfid_suffix_start_number,
                 bpet_age_upto30=bpet_age_upto30,
                 bpet_age_upto40=bpet_age_upto40,
                 bpet_age_40_45=bpet_age_40_45,
@@ -299,33 +330,74 @@ class RaceService:
         source_table = getattr(source_race, "table_name", None) or f"race_{source_race.name}_participants"
         target_table = getattr(target_race, "table_name", None) or f"race_{target_race.name}_participants"
 
-        rows = db.execute(
-            text(
-                f"""
-                SELECT rfid_tag, s_no, army_number, rank, remarks, encrypted_name, age, gender, category, encryption_key_id
-                FROM "{source_table}"
-                WHERE race_id = :race_id
-                """
-            ),
-            {"race_id": source_race_id}
-        ).fetchall()
+        try:
+            rows = db.execute(
+                text(
+                    f"""
+                    SELECT rfid_tag, s_no, army_number, rank, remarks, encrypted_name, age, gender, category, encryption_key_id
+                    FROM "{source_table}"
+                    WHERE race_id = :race_id
+                    """
+                ),
+                {"race_id": source_race_id}
+            ).fetchall()
+        except Exception:
+            # Legacy per-race tables may not have bulk columns (s_no/army_number/rank/remarks).
+            rows = db.execute(
+                text(
+                    f"""
+                    SELECT rfid_tag, encrypted_name, age, gender, category, encryption_key_id
+                    FROM "{source_table}"
+                    WHERE race_id = :race_id
+                    """
+                ),
+                {"race_id": source_race_id}
+            ).fetchall()
 
         if not rows:
             return 0
 
         fernet_manager = get_fernet_manager()
         payloads = []
+
+        def _value(row, key: str, index: int):
+            mapping = getattr(row, "_mapping", None)
+            if mapping is not None and key in mapping:
+                return mapping[key]
+            if hasattr(row, key):
+                return getattr(row, key)
+            try:
+                return row[index]
+            except Exception:
+                return None
+
         for row in rows:
-            rfid_tag = getattr(row, "rfid_tag", None) or row[0]
-            s_no = getattr(row, "s_no", None) or row[1]
-            army_number = getattr(row, "army_number", None) or row[2]
-            rank = getattr(row, "rank", None) or row[3]
-            remarks = getattr(row, "remarks", None) or row[4]
-            encrypted_name = getattr(row, "encrypted_name", None) or row[5]
-            age = getattr(row, "age", None) or row[6]
-            gender = getattr(row, "gender", None) or row[7]
-            category = getattr(row, "category", None) or row[8]
-            encryption_key_id = getattr(row, "encryption_key_id", None) or row[9]
+            rfid_tag = _value(row, "rfid_tag", 0)
+            s_no = _value(row, "s_no", 1)
+            army_number = _value(row, "army_number", 2)
+            rank = _value(row, "rank", 3)
+            remarks = _value(row, "remarks", 4)
+            encrypted_name = _value(row, "encrypted_name", 5)
+            age = _value(row, "age", 6)
+            gender = _value(row, "gender", 7)
+            category = _value(row, "category", 8)
+            encryption_key_id = _value(row, "encryption_key_id", 9)
+
+            # In legacy-query fallback, selected columns are in compact order.
+            if encrypted_name is None:
+                encrypted_name = _value(row, "encrypted_name", 1)
+            if age is None:
+                age = _value(row, "age", 2)
+            if gender is None:
+                gender = _value(row, "gender", 3)
+            if category is None:
+                category = _value(row, "category", 4)
+            if encryption_key_id is None:
+                encryption_key_id = _value(row, "encryption_key_id", 5)
+
+            if not rfid_tag or not encrypted_name or not gender:
+                # Skip malformed source rows instead of failing whole copy.
+                continue
 
             if not encryption_key_id:
                 key_record = fernet_manager.get_or_create_active_key(db)
@@ -433,6 +505,7 @@ class RaceService:
         allowed_fields = [
             'name', 'distance_meters', 'location',
             'scheduled_date', 'description', 'status', 'race_category', 'rfid_placement_mode',
+            'rfid_prefix', 'rfid_suffix_digits', 'rfid_suffix_start_number',
             'bpet_age_upto30', 'bpet_age_upto40', 'bpet_age_40_45',
             'cpt_age_upto35', 'cpt_age_35_45', 'cpt_age_45_50', 'cpt_age_50_55', 'cpt_age_55_60',
             'ppt_age_upto30', 'ppt_age_30_40', 'ppt_age_40_45', 'ppt_age_45_50',
@@ -455,6 +528,33 @@ class RaceService:
 
                 if field == 'rfid_placement_mode' and getattr(race, 'status', None) != RaceStatus.CREATED.value:
                     raise ValidationError("RFID placement mode can only be updated before the race starts")
+
+                if field in ('rfid_prefix', 'rfid_suffix_digits', 'rfid_suffix_start_number') and getattr(race, 'status', None) != RaceStatus.CREATED.value:
+                    raise ValidationError("RFID prefix/suffix can only be updated before the race starts")
+
+                if field == 'rfid_prefix':
+                    value = str(value).strip().upper()
+                    if not re.fullmatch(r"[A-Fa-f0-9]+", value):
+                        raise ValidationError("RFID prefix must be hexadecimal")
+
+                if field == 'rfid_suffix_digits':
+                    value = int(value)
+
+                if field == 'rfid_suffix_start_number':
+                    value = int(value)
+                    if value < 0:
+                        raise ValidationError("RFID suffix start number must be non-negative")
+
+                # Enforce combined RFID length limit for auto-assigned tags.
+                next_prefix = str(value) if field == 'rfid_prefix' else str(getattr(race, 'rfid_prefix', RFID_DEFAULT_PREFIX) or RFID_DEFAULT_PREFIX)
+                next_suffix_digits = int(value) if field == 'rfid_suffix_digits' else int(getattr(race, 'rfid_suffix_digits', RFID_DEFAULT_SUFFIX_DIGITS) or RFID_DEFAULT_SUFFIX_DIGITS)
+                next_suffix_start_number = int(value) if field == 'rfid_suffix_start_number' else int(getattr(race, 'rfid_suffix_start_number', RFID_DEFAULT_SUFFIX_START_NUMBER) or RFID_DEFAULT_SUFFIX_START_NUMBER)
+                if (field in ('rfid_prefix', 'rfid_suffix_digits')) and (len(next_prefix) + next_suffix_digits > 32):
+                    raise ValidationError("rfid_prefix + rfid_suffix_digits must not exceed 32 characters")
+                if field in ('rfid_suffix_digits', 'rfid_suffix_start_number'):
+                    max_seq_value = (10 ** next_suffix_digits) - 1
+                    if next_suffix_start_number < 0 or next_suffix_start_number > max_seq_value:
+                        raise ValidationError(f"rfid_suffix_start_number must be between 0 and {max_seq_value}")
 
                 # Convert scheduled_date if it's a string
                 if field == 'scheduled_date' and isinstance(value, str):

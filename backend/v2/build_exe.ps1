@@ -1,6 +1,6 @@
 # Build a standalone Windows .exe for backend v2
 # Usage (from PowerShell):
-#   Set-Location e:\Innogative\rfid-marathon\backend\v2
+#   Set-Location backend\v2
 #   .\build_exe.ps1
 
 $ErrorActionPreference = "Stop"

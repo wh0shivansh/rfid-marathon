@@ -64,11 +64,76 @@ export function attachCreateRaceHandlers() {
   const createForm = document.getElementById("create-race-form");
   if (!createForm) return;
 
+  // Defensive repopulation in case the view was entered from a path that
+  // already rendered the form before setup hook completed.
+  populateCopyFromRaceSelect();
+
   const categorySelect = document.getElementById('race-category-select');
   if (categorySelect) {
     renderQualifyingTimesGrid(categorySelect.value || 'BPET');
     categorySelect.addEventListener('change', () => {
       renderQualifyingTimesGrid(categorySelect.value || 'BPET');
+    });
+  }
+
+  const rfidPrefixInput = document.getElementById('rfid-prefix-input');
+  const rfidSuffixDigitsInput = document.getElementById('rfid-suffix-digits-input');
+  const rfidSuffixStartInput = document.getElementById('rfid-suffix-start-number-input');
+  const rfidPreviewValue = document.getElementById('rfid-preview-value');
+
+  const updateRfidPreview = () => {
+    if (!rfidPreviewValue || !rfidPrefixInput || !rfidSuffixDigitsInput || !rfidSuffixStartInput) return;
+
+    const prefix = String(rfidPrefixInput.value || '').trim().toUpperCase();
+    const suffixDigitsRaw = Number(rfidSuffixDigitsInput.value);
+    const suffixStartRaw = Number(rfidSuffixStartInput.value);
+
+    const suffixDigits = Number.isFinite(suffixDigitsRaw) ? Math.max(1, Math.min(12, Math.floor(suffixDigitsRaw))) : 1;
+    const maxValue = Math.pow(10, suffixDigits) - 1;
+    const suffixStart = Number.isFinite(suffixStartRaw) ? Math.max(0, Math.min(maxValue, Math.floor(suffixStartRaw))) : 0;
+
+    const suffixText = String(suffixStart).padStart(suffixDigits, '0');
+    rfidPreviewValue.textContent = `${prefix}${suffixText}`;
+  };
+
+  [rfidPrefixInput, rfidSuffixDigitsInput, rfidSuffixStartInput].forEach((el) => {
+    if (!el) return;
+    el.addEventListener('input', updateRfidPreview);
+    el.addEventListener('change', updateRfidPreview);
+  });
+
+  updateRfidPreview();
+
+  const rfidSettingsEditBtn = document.getElementById('rfid-settings-edit-btn');
+  if (rfidSettingsEditBtn) {
+    rfidSettingsEditBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      const rfidInputs = [
+        document.getElementById('rfid-prefix-input'),
+        document.getElementById('rfid-suffix-digits-input'),
+        document.getElementById('rfid-suffix-start-number-input'),
+      ].filter(Boolean);
+
+      const currentlyDisabled = rfidInputs.some((input) => input.disabled);
+      rfidInputs.forEach((input) => {
+        if (currentlyDisabled) {
+          input.removeAttribute('disabled');
+          input.style.background = '#0f172a';
+          input.style.color = '#e2e8f0';
+          input.style.border = '1px solid #334155';
+          input.style.cursor = 'text';
+        } else {
+          input.setAttribute('disabled', 'disabled');
+          input.style.background = '#334155';
+          input.style.color = '#94a3b8';
+          input.style.border = '1px solid #475569';
+          input.style.cursor = 'not-allowed';
+        }
+      });
+
+      rfidSettingsEditBtn.title = currentlyDisabled ? 'Lock editing' : 'Enable editing';
+      rfidSettingsEditBtn.textContent = currentlyDisabled ? '✓' : '✎';
+      updateRfidPreview();
     });
   }
 
@@ -83,6 +148,35 @@ export async function submitCreateRace(formElement) {
   
   try {
     const formData = Object.fromEntries(new FormData(formElement).entries());
+    const config = window.appContext?.state?.config || {};
+
+    const rfidPrefixInput = document.getElementById('rfid-prefix-input');
+    const rfidSuffixDigitsInput = document.getElementById('rfid-suffix-digits-input');
+    const rfidSuffixStartInput = document.getElementById('rfid-suffix-start-number-input');
+
+    const rfidPrefix = String(
+      rfidPrefixInput?.value ?? formData.rfid_prefix ?? config.rfidDefaultPrefix ?? ''
+    ).trim().toUpperCase();
+
+    const rawSuffixDigits = Number(
+      rfidSuffixDigitsInput?.value ?? formData.rfid_suffix_digits ?? config.rfidDefaultSuffixDigits
+    );
+    const rfidSuffixDigits = Number.isFinite(rawSuffixDigits)
+      ? Math.max(1, Math.min(12, Math.floor(rawSuffixDigits)))
+      : 3;
+
+    const rawSuffixStart = Number(
+      rfidSuffixStartInput?.value ?? formData.rfid_suffix_start_number ?? config.rfidDefaultSuffixStartNumber
+    );
+    const maxSuffixStart = Math.pow(10, rfidSuffixDigits) - 1;
+    const rfidSuffixStartNumber = Number.isFinite(rawSuffixStart)
+      ? Math.max(0, Math.min(maxSuffixStart, Math.floor(rawSuffixStart)))
+      : 0;
+
+    if (!rfidPrefix) {
+      showToast('RFID prefix is required', 'warning');
+      return;
+    }
     
     // Validate and parse scheduled date
     const rawDate = formData.scheduled_date || formData.schedule_date;
@@ -126,11 +220,14 @@ export async function submitCreateRace(formElement) {
         body: {
           name: formData.name,
           distance_meters: Number(formData.distance_meters),
-          location: formData.location,
+          location: formData.location ? String(formData.location).trim() : undefined,
           scheduled_date: isoDate,
           description: formData.description || undefined,
           race_category: category,
           rfid_placement_mode: formData.rfid_placement_mode || 'end_intersection',
+          rfid_prefix: rfidPrefix,
+          rfid_suffix_digits: rfidSuffixDigits,
+          rfid_suffix_start_number: rfidSuffixStartNumber,
           ...qualifyingPayload,
           ...(copyFromRaceId ? { copy_from_race_id: copyFromRaceId } : {}),
         },
@@ -180,11 +277,18 @@ function populateCopyFromRaceSelect() {
   const { state } = window.appContext;
   const copyFromRaceSelect = document.getElementById("copy-from-race-id");
   if (!copyFromRaceSelect) return;
+
+  const races = Array.isArray(state.races) ? state.races : [];
   
   const currentValue = copyFromRaceSelect.value;
   const options = [
     '<option value="">Do not copy</option>',
-    ...state.races.map((race) => `<option value="${race.id}">${race.name}</option>`)
+    ...races.map((race, idx) => {
+      const raceId = String(race?.id || '').trim();
+      const raceName = String(race?.name || race?.race_name || '').trim();
+      const optionLabel = raceName || (raceId ? `Race ${idx + 1} (${raceId.slice(0, 8)})` : `Race ${idx + 1}`);
+      return `<option value="${raceId}">${optionLabel}</option>`;
+    })
   ];
   copyFromRaceSelect.innerHTML = options.join("");
   if (currentValue) {

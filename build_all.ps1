@@ -1,4 +1,3 @@
-# filepath: e:\Innogative\rfid-marathon\build_all.ps1
 # Build all components in sequence
 
 $ErrorActionPreference = "Stop"
@@ -10,8 +9,15 @@ Set-Location (Join-Path $root "database")
 .\build_database.ps1
 
 Write-Host "Building frontend..."
+Set-Location $root
+# check if the folder exist then delete the folder
+if (Test-Path "RFID-Marathon-Automation\marathon-win32-x64") {
+    Remove-Item "RFID-Marathon-Automation\marathon-win32-x64" -Recurse -Force
+}
 Set-Location (Join-Path $root "frontend")
 npm run package
+Move-Item -Path "out\marathon-win32-x64" -Destination "..\RFID-Marathon-Automation" -Force
+Remove-Item "out" -Recurse -Force
 
 Write-Host "Building backend v2..."
 Set-Location (Join-Path $root "backend\v2")
@@ -32,4 +38,4 @@ Set-Location (Join-Path $root "control-hub")
 
 Write-Host "All builds completed successfully!"
 deactivate
-cd ..
+Set-Location ..

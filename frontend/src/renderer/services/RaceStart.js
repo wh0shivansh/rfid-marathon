@@ -454,8 +454,8 @@ async function openRaceModeEditModal(race) {
         <div style="margin-top: 16px;">
           <label style="display:block; color:#cbd5e1; margin-bottom:8px;">Placement Mode</label>
           <select id="race-mode-select" style="width:100%; padding:10px; background:#0f172a; border:1px solid #334155; color:#e2e8f0; border-radius:6px;">
-            <option value="mid_end_reader_diff">Mid + End readers (reader differentiation)</option>
             <option value="end_intersection">Dual End antennas (intersection, no mid check)</option>
+            <option value="mid_end_reader_diff">Mid + End readers (reader differentiation)</option>
           </select>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:18px;">

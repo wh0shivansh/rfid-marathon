@@ -35,12 +35,15 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # Editable test controls (update these directly, no CLI args needed)
 # ---------------------------------------------------------------------------
-START_COUNT = 1
-END_COUNT = 30
-READER_NAME = os.getenv("READER_NAME", "Reader 3")
-BULK_ENDPOINT_URL = os.getenv("BULK_ENDPOINT_URL", "http://127.0.0.1:8000/api/v2/rfid/bulk")
-DRY_RUN = False
-REQUEST_TIMEOUT_SECONDS = 10.0
+START_COUNT: int = 130
+END_COUNT: int = 159
+READER_NAME: str = os.getenv("READER_NAME", "Reader 3")
+BULK_ENDPOINT_URL: str = os.getenv("BULK_ENDPOINT_URL", "http://127.0.0.1:8000/api/v2/rfid/bulk")
+DRY_RUN: bool = False
+REQUEST_TIMEOUT_SECONDS: float = 10.0
+
+RFID_DEFAULT_PREFIX: str = str(os.getenv("RFID_DEFAULT_PREFIX", "2")).strip().upper()
+RFID_DEFAULT_SUFFIX_DIGITS: int = max(1, int(os.getenv("RFID_DEFAULT_SUFFIX_DIGITS", "3")))
 
 def _now_ms() -> int:
 	return int(time.time() * 1000)
@@ -67,14 +70,18 @@ def _reader_id_from_timing_point(timing_point: str) -> int:
 	return 3
 
 
+def _build_test_rfid(sequence: int) -> str:
+	return f"{RFID_DEFAULT_PREFIX}{int(sequence):0{RFID_DEFAULT_SUFFIX_DIGITS}d}"
+
+
 def build_dummy_event_packet(reader_name: str, start_count: int, end_count: int) -> Dict[str, Any]:
 	batch: List[Dict[str, Any]] = []
-	for i in range(start_count, end_count + 1):
+	for seq in range(start_count, end_count + 1):
 		ft = _now_ms()
 		lt = _now_ms()
 		batch.append(
 			{
-				"epc": f"315354010100000000000{str(i).zfill(3)}",
+				"epc": _build_test_rfid(seq),
 				"ft": ft,
 				"lt": lt,
 			}
@@ -130,8 +137,8 @@ def post_json(url: str, payload: Dict[str, Any], timeout: float = 10.0) -> Dict[
 def main() -> None:
 	start_count = max(1, int(START_COUNT))
 	end_count = max(start_count, int(END_COUNT))
-	reader_name = str(READER_NAME or "Reader 3")
-	url = str(BULK_ENDPOINT_URL or "http://127.0.0.1:8000/api/v2/rfid/bulk")
+	reader_name = READER_NAME
+	url = BULK_ENDPOINT_URL
 
 	packet = build_dummy_event_packet(reader_name=reader_name, start_count=start_count, end_count=end_count)
 	timing_point = _infer_timing_point(reader_name)
@@ -140,6 +147,10 @@ def main() -> None:
 
 	print(f"Built packet with {len(entries)} tags from reader '{reader_name}'")
 	print(f"Resolved timing_point='{timing_point}', reader_id={reader_id}")
+	print(
+		f"RFID pattern prefix='{RFID_DEFAULT_PREFIX}', suffix_digits={RFID_DEFAULT_SUFFIX_DIGITS}, "
+		f"start_count={start_count}, end_count={end_count}"
+	)
 	if not entries:
 		print("No valid payloads to send")
 		return

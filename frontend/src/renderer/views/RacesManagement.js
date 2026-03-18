@@ -2,6 +2,8 @@
 // All JavaScript logic is in app.js
 
 export function renderRacesManagement(races = [], selectedCategory = '') {
+  const hasLocation = (value) => String(value || '').trim().length > 0;
+
   return `
     <div class="page" style="background:#0b1220; min-height:100vh; color:#e2e8f0; padding:16px;">
       <!-- Header Section -->
@@ -55,10 +57,12 @@ export function renderRacesManagement(races = [], selectedCategory = '') {
                   <span style="color: #94a3b8; font-size: 14px;">📏</span>
                   <span style="color: #cbd5e1; font-size: 14px;">${race.distance_meters}m</span>
                 </div>
+                ${hasLocation(race.location) ? `
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <span style="color: #94a3b8; font-size: 14px;">📍</span>
-                  <span style="color: #cbd5e1; font-size: 14px;">${race.location}</span>
+                  <span style="color: #cbd5e1; font-size: 14px;">${String(race.location).trim()}</span>
                 </div>
+                ` : ''}
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <span style="color: #94a3b8; font-size: 14px;">📅</span>
                   <span style="color: #cbd5e1; font-size: 14px;">${new Date(race.scheduled_date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>

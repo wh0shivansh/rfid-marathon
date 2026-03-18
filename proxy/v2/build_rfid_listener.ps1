@@ -1,13 +1,13 @@
 # Build a standalone Windows .exe for proxy v2
 # Usage (from PowerShell):
-#   Set-Location e:\Innogative\rfid-marathon\proxy\v2
+#   Set-Location proxy\v2
 #   .\build_rfid_listener.ps1
 
 $ErrorActionPreference = "Stop"
 
 Set-Location $PSScriptRoot
 
-# check if the file exist then delete the folder
+# check if the folder exist then delete the folder
 if (Test-Path "..\..\RFID-Marathon-Automation\rfid-listener") {
     Remove-Item "..\..\RFID-Marathon-Automation\rfid-listener" -Recurse -Force
 }

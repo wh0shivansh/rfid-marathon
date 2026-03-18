@@ -59,6 +59,7 @@ function normalizeRemarkLabel(label) {
 }
 
 export function renderScoreboard(races = [], participants = [], selectedRaceId = null, options = {}) {
+  const formatRaceLabel = window.appContext?.formatRaceLabel || ((race) => String(race?.name || ''));
   // Filter only completed races
   const completedRaces = races.filter(r => r.status === 'completed');
   const searchQuery = (options.searchQuery || '').trim().toLowerCase();
@@ -246,7 +247,7 @@ export function renderScoreboard(races = [], participants = [], selectedRaceId =
               <option value="">-- Select a completed race --</option>
               ${completedRaces.map(race => `
                 <option value="${race.id}" ${String(selectedRaceId) === String(race.id) ? 'selected' : ''}>
-                  ${race.name} - ${race.location} (${new Date(race.scheduled_date).toLocaleDateString()})
+                  ${formatRaceLabel(race)}
                 </option>
               `).join('')}
             </select>

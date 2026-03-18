@@ -1,6 +1,6 @@
 # Build a standalone Windows .exe for control hub
 # Usage (from PowerShell):
-#   Set-Location e:\Innogative\rfid-marathon\control-hub
+#   Set-Location control-hub
 #   .\build_control_hub.ps1
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +12,12 @@ if (-not (Test-Path ".venv")) {
     python -m venv .venv
 }
 
-. .\.venv\Scripts\Activate.ps1
+. .venv\Scripts\Activate.ps1
+
+# check if the file exist then delete it
+if (Test-Path "..\RFID-Marathon-Automation\control-hub.exe") {
+    Remove-Item "..\RFID-Marathon-Automation\control-hub.exe"
+}
 
 python -m pip install --upgrade pip
 python -m pip install pyinstaller

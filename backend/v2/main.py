@@ -22,7 +22,7 @@ from dateutil import parser
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from multiprocessing import freeze_support
-from typing import Optional, Any, cast, List
+from typing import Optional, Any, cast, List, Set, Tuple
 import json
 
 import pandas as pd
@@ -36,7 +36,19 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from sqlalchemy.engine import CursorResult
 
-from constants import API_PREFIX, RaceStatus, RACE_STATUS_TRANSITIONS, ErrorMessages, FeatureFlags, BULK_HEADERS, RFID_PREFIX, RACE_CATEGORY_CONFIG
+from constants import (
+    API_PREFIX,
+    RaceStatus,
+    RACE_STATUS_TRANSITIONS,
+    ErrorMessages,
+    FeatureFlags,
+    BULK_HEADERS,
+    BULK_OPTIONAL_HEADERS,
+    RFID_DEFAULT_PREFIX,
+    RFID_DEFAULT_SUFFIX_DIGITS,
+    RFID_DEFAULT_SUFFIX_START_NUMBER,
+    RACE_CATEGORY_CONFIG,
+)
 from database.connection import (
     initialize_database,
     shutdown_database,
@@ -392,6 +404,9 @@ async def create_race(
         copy_from_race_id=payload.copy_from_race_id,
         race_category=str(payload.race_category.value if hasattr(payload.race_category, "value") else payload.race_category),
         rfid_placement_mode=str(payload.rfid_placement_mode.value if hasattr(payload.rfid_placement_mode, "value") else payload.rfid_placement_mode),
+        rfid_prefix=payload.rfid_prefix,
+        rfid_suffix_digits=payload.rfid_suffix_digits,
+        rfid_suffix_start_number=payload.rfid_suffix_start_number,
         bpet_age_upto30=payload.bpet_age_upto30,
         bpet_age_upto40=payload.bpet_age_upto40,
         bpet_age_40_45=payload.bpet_age_40_45,
@@ -784,6 +799,7 @@ def _normalize_bulk_header(value: Any) -> str:
     aliases = {
         "s no": "s.no",
         "s/no": "s.no",
+        "s/n": "s.no",
         "s/number": "s.no",
         "sno": "s.no",
         "sr no": "s.no",
@@ -795,6 +811,9 @@ def _normalize_bulk_header(value: Any) -> str:
         "rank": "rank",
         "name": "name",
         "age": "age",
+        "rfid": "rfid",
+        "rfid tag": "rfid",
+        "rfid_tag": "rfid",
         "remark": "remarks",
         "remarks": "remarks",
     }
@@ -830,12 +849,23 @@ def _load_bulk_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
         raise ValidationError("Unsupported file type. Use .docx, .xlsx, or .csv")
 
     df.columns = [_normalize_bulk_header(c) for c in df.columns]
-    if set(df.columns) != set(BULK_HEADERS):
+    required_headers = set(BULK_HEADERS)
+    optional_headers = set(BULK_OPTIONAL_HEADERS)
+    incoming_headers = set(df.columns)
+
+    missing_required = required_headers - incoming_headers
+    unknown_headers = incoming_headers - required_headers - optional_headers
+
+    if missing_required or unknown_headers:
         raise ValidationError(
-            "Invalid file headers. Expected: s.no, army number, rank, name, age, remarks"
+            "Invalid file headers. Required: s.no, army number, rank, name, age, remarks. Optional: rfid"
         )
 
-    df = df[BULK_HEADERS].copy()
+    ordered_headers = BULK_HEADERS + [h for h in BULK_OPTIONAL_HEADERS if h in df.columns]
+    df = df[ordered_headers].copy()
+    if "rfid" not in df.columns:
+        df["rfid"] = None
+
     df = df.dropna(how="all")
 
     if df.empty:
@@ -858,13 +888,80 @@ def _load_bulk_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
     if not invalid_age.empty:
         raise ValidationError("Age must be between 0 and 45 for bulk registration")
 
+    df["rfid"] = df["rfid"].apply(
+        lambda value: str(value).strip().upper() if pd.notna(value) else None
+    )
+    df["rfid"] = df["rfid"].replace("", None)
+
+    invalid_rfid_rows = df[df["rfid"].notna() & ~df["rfid"].apply(validate_rfid_tag)]
+    if not invalid_rfid_rows.empty:
+        raise ValidationError("Invalid RFID values found in upload. RFID must be hexadecimal.")
+
     df["remarks"] = None
     # Default gender to 'M' if not provided elsewhere
     df["gender"] = "M"
     return df
 
 
-def _assign_bulk_rfids(df: pd.DataFrame, start_seq: int) -> pd.DataFrame:
+def _normalize_race_rfid_settings(race: Any) -> Tuple[str, int, int]:
+    race_prefix = str(getattr(race, "rfid_prefix", RFID_DEFAULT_PREFIX) or RFID_DEFAULT_PREFIX).strip().upper()
+    try:
+        race_suffix_digits = int(getattr(race, "rfid_suffix_digits", RFID_DEFAULT_SUFFIX_DIGITS) or RFID_DEFAULT_SUFFIX_DIGITS)
+    except Exception as exc:
+        raise ValidationError(f"Invalid race RFID suffix digits configuration: {exc}")
+    try:
+        race_suffix_start_number = int(
+            getattr(race, "rfid_suffix_start_number", RFID_DEFAULT_SUFFIX_START_NUMBER)
+            or RFID_DEFAULT_SUFFIX_START_NUMBER
+        )
+    except Exception as exc:
+        raise ValidationError(f"Invalid race RFID suffix start number configuration: {exc}")
+
+    if not validate_rfid_tag(race_prefix):
+        raise ValidationError("Race RFID prefix must be hexadecimal")
+    if race_suffix_digits < 1:
+        raise ValidationError("Race RFID suffix digits must be at least 1")
+    if len(race_prefix) + race_suffix_digits > 32:
+        raise ValidationError("Race RFID prefix and suffix digits exceed max RFID length (32)")
+    max_seq_value = (10 ** race_suffix_digits) - 1
+    if race_suffix_start_number < 0 or race_suffix_start_number > max_seq_value:
+        raise ValidationError(
+            f"Race RFID suffix start number must be between 0 and {max_seq_value}"
+        )
+
+    return race_prefix, race_suffix_digits, race_suffix_start_number
+
+
+def _extract_auto_alloc_seq(tag: str, prefix: str, suffix_digits: int) -> Optional[int]:
+    tag_str = str(tag or "").strip().upper()
+    expected_length = len(prefix) + suffix_digits
+
+    if len(tag_str) != expected_length:
+        return None
+    if not tag_str.startswith(prefix):
+        return None
+
+    suffix = tag_str[-suffix_digits:]
+    if not suffix.isdigit():
+        return None
+
+    try:
+        return int(suffix)
+    except Exception:
+        return None
+
+
+def _build_auto_alloc_rfid(prefix: str, suffix_digits: int, seq: int) -> str:
+    return f"{prefix}{int(seq):0{suffix_digits}d}"
+
+
+def _assign_bulk_rfids(
+    df: pd.DataFrame,
+    start_seq: int,
+    prefix: str,
+    suffix_digits: int,
+    occupied_sequences: Set[int],
+) -> pd.DataFrame:
     def _age_group_order(age: int) -> int:
         if age <= 30:
             return 0
@@ -882,14 +979,39 @@ def _assign_bulk_rfids(df: pd.DataFrame, start_seq: int) -> pd.DataFrame:
     df = df.sort_values(["_age_group_order", "s.no"], ascending=[True, True]).reset_index(drop=True)
     df = df.drop(columns=["_age_group_order"])
 
-    if start_seq < 0 or start_seq > 999:
-        raise ValidationError("RFID sequence start must be between 0 and 999")
-    if (start_seq + len(df) - 1) > 999:
-        raise ValidationError("RFID sequence exceeds 999 for this bulk upload")
+    max_seq_value = (10 ** suffix_digits) - 1
+    if start_seq < 0 or start_seq > max_seq_value:
+        raise ValidationError(f"RFID sequence start must be between 0 and {max_seq_value}")
 
-    seq = pd.Series(range(start_seq, start_seq + len(df)), index=df.index)
-    df["rfid_seq"] = seq
-    df["rfid_tag"] = df["rfid_seq"].apply(lambda n: f"{RFID_PREFIX}{int(n):03d}")
+    used_sequences = set(int(v) for v in occupied_sequences if v is not None)
+    next_seq = start_seq
+
+    df["rfid_seq"] = None
+    if "rfid_tag" not in df.columns:
+        df["rfid_tag"] = None
+
+    for idx in df.index:
+        existing_tag = df.at[idx, "rfid_tag"]
+        if existing_tag and str(existing_tag).strip():
+            maybe_seq = _extract_auto_alloc_seq(str(existing_tag), prefix, suffix_digits)
+            if maybe_seq is not None:
+                used_sequences.add(maybe_seq)
+                df.at[idx, "rfid_seq"] = maybe_seq
+            continue
+
+        while next_seq in used_sequences and next_seq <= max_seq_value:
+            next_seq += 1
+
+        if next_seq > max_seq_value:
+            raise ValidationError(
+                f"RFID sequence exceeds {max_seq_value} for this bulk upload with suffix length {suffix_digits}"
+            )
+
+        df.at[idx, "rfid_seq"] = next_seq
+        df.at[idx, "rfid_tag"] = _build_auto_alloc_rfid(prefix, suffix_digits, next_seq)
+        used_sequences.add(next_seq)
+        next_seq += 1
+
     return df
 
 
@@ -969,6 +1091,7 @@ async def bulk_upload_candidates(
         raise ValidationError("Missing upload file")
 
     table_name = _safe_table_name(race)
+    race_rfid_prefix, race_rfid_suffix_digits, race_rfid_start_number = _normalize_race_rfid_settings(race)
     file_bytes = await file.read()
 
     df = _load_bulk_dataframe(file_bytes, file.filename)
@@ -983,32 +1106,6 @@ async def bulk_upload_candidates(
     if duplicate_mask.any():
         skipped_duplicate_army_numbers = int(duplicate_mask.sum())
         df = df[~duplicate_mask]
-
-    # Determine RFID sequence start based on existing tags
-    max_seq = 0
-    try:
-        rows = db.execute(
-            text(f'SELECT rfid_tag FROM "{table_name}" WHERE race_id = :race_id'),
-            {"race_id": race_id}
-        ).fetchall()
-        for row in rows:
-            tag = getattr(row, "rfid_tag", None) or row[0]
-            if not tag:
-                continue
-            tag_str = str(tag)
-            if not validate_rfid_tag(tag_str):
-                continue
-            if not tag_str.startswith(RFID_PREFIX) or len(tag_str) != len(RFID_PREFIX) + 3:
-                continue
-            suffix = tag_str[-3:]
-            if not suffix.isdigit():
-                continue
-            try:
-                max_seq = max(max_seq, int(suffix))
-            except Exception:
-                continue
-    except Exception:
-        max_seq = 0
 
     existing_army_numbers = set()
     try:
@@ -1035,7 +1132,63 @@ async def bulk_upload_candidates(
     if df.empty:
         raise ValidationError("No valid candidate rows after removing existing army numbers")
 
-    df = _assign_bulk_rfids(df, max_seq + 1)
+    df["rfid_tag"] = df["rfid"]
+
+    provided_rfid_rows = df[df["rfid_tag"].notna()]
+    if not provided_rfid_rows.empty:
+        duplicated_provided_rfids = provided_rfid_rows[provided_rfid_rows["rfid_tag"].duplicated()]
+        if not duplicated_provided_rfids.empty:
+            raise ValidationError("Duplicate RFID values found in upload file")
+
+    # Determine RFID sequence start based on existing and uploaded tags that match
+    # this race's auto-allocation pattern.
+    max_seq = race_rfid_start_number - 1
+    occupied_sequences: Set[int] = set()
+    existing_rfids: Set[str] = set()
+    try:
+        rows = db.execute(
+            text(f'SELECT rfid_tag FROM "{table_name}" WHERE race_id = :race_id'),
+            {"race_id": race_id}
+        ).fetchall()
+        for row in rows:
+            tag = getattr(row, "rfid_tag", None) or row[0]
+            if not tag:
+                continue
+            tag_str = str(tag).strip().upper()
+            if not validate_rfid_tag(tag_str):
+                continue
+            existing_rfids.add(tag_str)
+            seq = _extract_auto_alloc_seq(tag_str, race_rfid_prefix, race_rfid_suffix_digits)
+            if seq is None:
+                continue
+            occupied_sequences.add(seq)
+            max_seq = max(max_seq, seq)
+    except Exception:
+        max_seq = 0
+        occupied_sequences = set()
+        existing_rfids = set()
+        max_seq = race_rfid_start_number - 1
+
+    if not provided_rfid_rows.empty:
+        provided_rfids = set(provided_rfid_rows["rfid_tag"].astype(str).str.strip().str.upper())
+        conflicting_rfids = provided_rfids.intersection(existing_rfids)
+        if conflicting_rfids:
+            raise ValidationError("Some provided RFID values are already registered for this race")
+
+        for tag_str in provided_rfids:
+            maybe_seq = _extract_auto_alloc_seq(tag_str, race_rfid_prefix, race_rfid_suffix_digits)
+            if maybe_seq is None:
+                continue
+            occupied_sequences.add(maybe_seq)
+            max_seq = max(max_seq, maybe_seq)
+
+    df = _assign_bulk_rfids(
+        df,
+        max_seq + 1,
+        race_rfid_prefix,
+        race_rfid_suffix_digits,
+        occupied_sequences,
+    )
 
     key_record = fernet_manager.get_or_create_active_key(db)
     encryption_key_id = str(key_record.id)
@@ -2371,5 +2524,11 @@ if __name__ == "__main__":
 
     host = os.getenv("APP_HOST", "0.0.0.0")
     port = int(os.getenv("APP_PORT", "8000"))
+    reload_env = str(os.getenv("APP_RELOAD", "true")).strip().lower()
+    reload_enabled = reload_env in {"1", "true", "yes", "on"}
 
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    # Uvicorn requires an import string for reload/workers in non-frozen mode.
+    if getattr(sys, "frozen", False):
+        uvicorn.run(app, host=host, port=port, log_level="info", reload=False)
+    else:
+        uvicorn.run("main:app", host=host, port=port, log_level="info", reload=reload_enabled)

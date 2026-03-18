@@ -2,6 +2,8 @@
 // All JavaScript logic is in app.js
 
 export function renderCandidateManagement(races = [], participants = [], selectedRaceId = null) {
+  const formatRaceLabel = window.appContext?.formatRaceLabel || ((race) => String(race?.name || ''));
+
   const filteredParticipants = selectedRaceId
     ? participants.filter(p => String(p.race_id) === String(selectedRaceId))
     : participants;
@@ -16,7 +18,7 @@ export function renderCandidateManagement(races = [], participants = [], selecte
             <option value="">All Races</option>
             ${races.map(race => `
               <option value="${race.id}" ${String(selectedRaceId) === String(race.id) ? 'selected' : ''}>
-                ${race.name} - ${race.location} (${new Date(race.scheduled_date).toLocaleDateString()})
+                ${formatRaceLabel(race)}
               </option>
             `).join('')}
           </select>

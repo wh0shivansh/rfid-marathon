@@ -105,6 +105,9 @@ contextBridge.exposeInMainWorld("secureApi", {
     username: getEnv("RFID_USERNAME", getEnv("USERNAME", "")),
     password: getEnv("RFID_PASSWORD", getEnv("PASSWORD", "")),
     deviceId: getEnv("FRONTEND_DEVICE_ID", "registration-station"),
+    rfidDefaultPrefix: getEnv("RFID_DEFAULT_PREFIX", "2"),
+    rfidDefaultSuffixDigits: getEnv("RFID_DEFAULT_SUFFIX_DIGITS", 3),
+    rfidDefaultSuffixStartNumber: getEnv("RFID_DEFAULT_SUFFIX_START_NUMBER", 130),
   }),
   getStoredCredentials: () => ({
     username: getEnv("RFID_USERNAME", getEnv("USERNAME", "")),

@@ -17,7 +17,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from models import Base, User, NonceCache
 from database.connection import get_database_manager
 from basefunctions import DatabaseError, log_security_event, get_current_timestamp_IST
-from constants import AuditAction
+from constants import (
+    AuditAction,
+    RFID_DEFAULT_PREFIX,
+    RFID_DEFAULT_SUFFIX_DIGITS,
+    RFID_DEFAULT_SUFFIX_START_NUMBER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -926,6 +931,16 @@ class MigrationManager:
                 else:
                     logger.info("✓ status column already exists in races table")
 
+                # Ensure location is optional (nullable)
+                try:
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ALTER COLUMN location DROP NOT NULL;
+                    """))
+                    session.commit()
+                except Exception as e:
+                    logger.warning(f"Could not make races.location nullable: {e}")
+
                 # Add race_category column if missing
                 if 'race_category' not in races_columns:
                     logger.info("Adding 'race_category' column to races table...")
@@ -960,6 +975,72 @@ class MigrationManager:
                 else:
                     logger.info("✓ rfid_placement_mode column already exists in races table")
 
+                # Add rfid_prefix column if missing
+                if 'rfid_prefix' not in races_columns:
+                    logger.info("Adding 'rfid_prefix' column to races table...")
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD COLUMN rfid_prefix VARCHAR(32);
+                    """))
+                    session.execute(
+                        text("UPDATE races SET rfid_prefix = :rfid_prefix WHERE rfid_prefix IS NULL"),
+                        {"rfid_prefix": RFID_DEFAULT_PREFIX}
+                    )
+                    session.execute(text(f"""
+                        ALTER TABLE races
+                        ALTER COLUMN rfid_prefix SET DEFAULT '{RFID_DEFAULT_PREFIX}',
+                        ALTER COLUMN rfid_prefix SET NOT NULL;
+                    """))
+                    session.commit()
+                    results["added_columns"].append("races.rfid_prefix")
+                    logger.info("✓ Added rfid_prefix column to races table")
+                else:
+                    logger.info("✓ rfid_prefix column already exists in races table")
+
+                # Add rfid_suffix_digits column if missing
+                if 'rfid_suffix_digits' not in races_columns:
+                    logger.info("Adding 'rfid_suffix_digits' column to races table...")
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD COLUMN rfid_suffix_digits INTEGER;
+                    """))
+                    session.execute(
+                        text("UPDATE races SET rfid_suffix_digits = :rfid_suffix_digits WHERE rfid_suffix_digits IS NULL"),
+                        {"rfid_suffix_digits": int(RFID_DEFAULT_SUFFIX_DIGITS)}
+                    )
+                    session.execute(text(f"""
+                        ALTER TABLE races
+                        ALTER COLUMN rfid_suffix_digits SET DEFAULT {int(RFID_DEFAULT_SUFFIX_DIGITS)},
+                        ALTER COLUMN rfid_suffix_digits SET NOT NULL;
+                    """))
+                    session.commit()
+                    results["added_columns"].append("races.rfid_suffix_digits")
+                    logger.info("✓ Added rfid_suffix_digits column to races table")
+                else:
+                    logger.info("✓ rfid_suffix_digits column already exists in races table")
+
+                # Add rfid_suffix_start_number column if missing
+                if 'rfid_suffix_start_number' not in races_columns:
+                    logger.info("Adding 'rfid_suffix_start_number' column to races table...")
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD COLUMN rfid_suffix_start_number INTEGER;
+                    """))
+                    session.execute(
+                        text("UPDATE races SET rfid_suffix_start_number = :rfid_suffix_start_number WHERE rfid_suffix_start_number IS NULL"),
+                        {"rfid_suffix_start_number": int(RFID_DEFAULT_SUFFIX_START_NUMBER)}
+                    )
+                    session.execute(text(f"""
+                        ALTER TABLE races
+                        ALTER COLUMN rfid_suffix_start_number SET DEFAULT {int(RFID_DEFAULT_SUFFIX_START_NUMBER)},
+                        ALTER COLUMN rfid_suffix_start_number SET NOT NULL;
+                    """))
+                    session.commit()
+                    results["added_columns"].append("races.rfid_suffix_start_number")
+                    logger.info("✓ Added rfid_suffix_start_number column to races table")
+                else:
+                    logger.info("✓ rfid_suffix_start_number column already exists in races table")
+
                 # Ensure mode constraint exists and supports all values
                 try:
                     session.execute(text("""
@@ -974,6 +1055,59 @@ class MigrationManager:
                     session.commit()
                 except Exception as e:
                     logger.warning(f"Could not update rfid_placement_mode constraint: {e}")
+
+                # Ensure RFID allocation constraints are present
+                try:
+                    session.execute(text("""
+                        ALTER TABLE races
+                        DROP CONSTRAINT IF EXISTS check_race_rfid_prefix_hex;
+                    """))
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD CONSTRAINT check_race_rfid_prefix_hex
+                        CHECK (rfid_prefix ~ '^[A-Fa-f0-9]+$');
+                    """))
+                    session.execute(text("""
+                        ALTER TABLE races
+                        DROP CONSTRAINT IF EXISTS check_race_rfid_suffix_digits;
+                    """))
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD CONSTRAINT check_race_rfid_suffix_digits
+                        CHECK (rfid_suffix_digits >= 1 AND rfid_suffix_digits <= 12);
+                    """))
+                    session.execute(text("""
+                        ALTER TABLE races
+                        DROP CONSTRAINT IF EXISTS check_race_rfid_tag_length;
+                    """))
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD CONSTRAINT check_race_rfid_tag_length
+                        CHECK (char_length(rfid_prefix) + rfid_suffix_digits <= 32);
+                    """))
+
+                    session.execute(text("""
+                        ALTER TABLE races
+                        DROP CONSTRAINT IF EXISTS check_race_rfid_suffix_start_non_negative;
+                    """))
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD CONSTRAINT check_race_rfid_suffix_start_non_negative
+                        CHECK (rfid_suffix_start_number >= 0);
+                    """))
+
+                    session.execute(text("""
+                        ALTER TABLE races
+                        DROP CONSTRAINT IF EXISTS check_race_rfid_suffix_start_range;
+                    """))
+                    session.execute(text("""
+                        ALTER TABLE races
+                        ADD CONSTRAINT check_race_rfid_suffix_start_range
+                        CHECK (rfid_suffix_start_number < power(10, rfid_suffix_digits));
+                    """))
+                    session.commit()
+                except Exception as e:
+                    logger.warning(f"Could not update race RFID allocation constraints: {e}")
             
             session.close()
             
