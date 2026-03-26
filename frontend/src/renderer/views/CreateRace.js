@@ -49,8 +49,8 @@ export function renderCreateRace() {
           <div class="dark-form-group">
             <label>RFID Placement Mode</label>
             <select name="rfid_placement_mode" required>
-              <option value="end_intersection" selected>Dual End antennas (intersection, no mid check)</option>
-              <option value="mid_end_reader_diff">Mid + End readers (reader differentiation)</option>
+              <option value="end_intersection" selected>Dual End antennas (no mid check)</option>
+              <option value="mid_end_reader_diff">Mid + End readers (mid check)</option>
             </select>
           </div>
 

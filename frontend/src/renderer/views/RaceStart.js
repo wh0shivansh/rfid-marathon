@@ -17,8 +17,8 @@ export function renderRaceStart(races = [], selectedRaceId = null) {
   const usesMidPoint = raceMode !== 'end_intersection';
   const canEditMode = raceStatus === 'created';
   const modeLabel = raceMode === 'end_intersection'
-    ? 'Dual End antennas (intersection, no mid check)'
-    : 'Mid + End readers (reader differentiation)';
+    ? 'Dual End antennas (no mid check)'
+    : 'Mid + End readers (mid check)';
   
   // Determine button text and state
   let buttonText = 'Start Race';

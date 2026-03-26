@@ -22,7 +22,7 @@ from dateutil import parser
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from multiprocessing import freeze_support
-from typing import Optional, Any, cast, List, Set, Tuple
+from typing import Optional, Any, cast, List, Set, Tuple, Dict
 import json
 
 import pandas as pd
@@ -955,6 +955,75 @@ def _build_auto_alloc_rfid(prefix: str, suffix_digits: int, seq: int) -> str:
     return f"{prefix}{int(seq):0{suffix_digits}d}"
 
 
+def _check_bulk_upload_table_config(db: Session, table_name: str) -> Dict[str, Any]:
+    """
+    Validate per-race participant table has required columns and constraints
+    for safe bulk upload RFID allocation and updates.
+    """
+    required_columns = {
+        "id",
+        "race_id",
+        "rfid_tag",
+        "s_no",
+        "army_number",
+        "rank",
+        "remarks",
+        "encrypted_name",
+        "age",
+        "gender",
+        "category",
+        "encryption_key_id",
+    }
+
+    try:
+        col_rows = db.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema() AND table_name = :table_name
+                """
+            ),
+            {"table_name": table_name}
+        ).fetchall()
+        existing_columns = {str(getattr(r, "column_name", None) or r[0]).strip().lower() for r in col_rows}
+
+        unique_rows = db.execute(
+            text(
+                """
+                SELECT pg_get_constraintdef(c.oid) AS definition
+                FROM pg_constraint c
+                JOIN pg_class t ON c.conrelid = t.oid
+                JOIN pg_namespace n ON t.relnamespace = n.oid
+                WHERE n.nspname = current_schema()
+                  AND t.relname = :table_name
+                  AND c.contype = 'u'
+                """
+            ),
+            {"table_name": table_name}
+        ).fetchall()
+
+        unique_defs = [str(getattr(r, "definition", None) or r[0] or "") for r in unique_rows]
+        normalized_unique_defs = [re.sub(r"\s+", "", d.lower()) for d in unique_defs]
+        has_unique_race_rfid = any("(race_id,rfid_tag)" in d for d in normalized_unique_defs)
+
+        missing_columns = sorted(required_columns - existing_columns)
+
+        return {
+            "ok": (len(missing_columns) == 0 and has_unique_race_rfid),
+            "missing_columns": missing_columns,
+            "has_unique_race_rfid": has_unique_race_rfid,
+        }
+    except Exception as exc:
+        logger.exception(f"Bulk upload config check failed for table {table_name}: {exc}")
+        return {
+            "ok": False,
+            "missing_columns": sorted(required_columns),
+            "has_unique_race_rfid": False,
+            "error": str(exc),
+        }
+
+
 def _assign_bulk_rfids(
     df: pd.DataFrame,
     start_seq: int,
@@ -1092,6 +1161,19 @@ async def bulk_upload_candidates(
 
     table_name = _safe_table_name(race)
     race_rfid_prefix, race_rfid_suffix_digits, race_rfid_start_number = _normalize_race_rfid_settings(race)
+
+    table_config = _check_bulk_upload_table_config(db, table_name)
+    if not table_config.get("ok"):
+        missing_columns = table_config.get("missing_columns") or []
+        missing_columns_str = ", ".join(missing_columns) if missing_columns else "none"
+        unique_ok = bool(table_config.get("has_unique_race_rfid"))
+        raise ValidationError(
+            "Database schema for this race is not ready for safe bulk upload. "
+            f"Missing columns: {missing_columns_str}. "
+            f"Unique(race_id, rfid_tag) present: {unique_ok}. "
+            "Run backend migrations and retry."
+        )
+
     file_bytes = await file.read()
 
     df = _load_bulk_dataframe(file_bytes, file.filename)
@@ -1140,9 +1222,8 @@ async def bulk_upload_candidates(
         if not duplicated_provided_rfids.empty:
             raise ValidationError("Duplicate RFID values found in upload file")
 
-    # Determine RFID sequence start based on existing and uploaded tags that match
-    # this race's auto-allocation pattern.
-    max_seq = race_rfid_start_number - 1
+    # Track occupied auto-allocation suffix numbers and then assign the lowest
+    # available suffix from race_rfid_start_number upward (gap-filling enabled).
     occupied_sequences: Set[int] = set()
     existing_rfids: Set[str] = set()
     try:
@@ -1162,12 +1243,9 @@ async def bulk_upload_candidates(
             if seq is None:
                 continue
             occupied_sequences.add(seq)
-            max_seq = max(max_seq, seq)
     except Exception:
-        max_seq = 0
         occupied_sequences = set()
         existing_rfids = set()
-        max_seq = race_rfid_start_number - 1
 
     if not provided_rfid_rows.empty:
         provided_rfids = set(provided_rfid_rows["rfid_tag"].astype(str).str.strip().str.upper())
@@ -1180,11 +1258,10 @@ async def bulk_upload_candidates(
             if maybe_seq is None:
                 continue
             occupied_sequences.add(maybe_seq)
-            max_seq = max(max_seq, maybe_seq)
 
     df = _assign_bulk_rfids(
         df,
-        max_seq + 1,
+        race_rfid_start_number,
         race_rfid_prefix,
         race_rfid_suffix_digits,
         occupied_sequences,
@@ -1381,7 +1458,7 @@ async def update_participant(
     
     Args:
         participant_id: Participant ID
-        payload: Updated fields (name, age, gender, category, rfid_tag)
+        payload: Updated fields (name, age, gender, category, rfid_tag, army_number)
         
     Returns:
         Updated participant data
@@ -1423,7 +1500,7 @@ async def update_participant(
     
     # Build update query dynamically
     update_fields = []
-    update_values = {"participant_id": participant_id}
+    update_values: Dict[str, Any] = {"participant_id": participant_id}
     
     # Handle name encryption if provided
     if "name" in payload and payload["name"]:
@@ -1434,6 +1511,8 @@ async def update_participant(
     # Handle RFID tag update
     if "rfid_tag" in payload and payload["rfid_tag"]:
         rfid_tag = payload["rfid_tag"].upper()
+        if not validate_rfid_tag(rfid_tag):
+            raise ValidationError("RFID tag must be hexadecimal")
         
         # Check for duplicate RFID in same race
         table_name = target_race.table_name
@@ -1454,6 +1533,36 @@ async def update_participant(
         
         update_fields.append("rfid_tag = :rfid_tag")
         update_values["rfid_tag"] = rfid_tag
+
+    # Handle army number update (allow clear by sending empty string/null)
+    if "army_number" in payload:
+        army_number_raw = payload.get("army_number")
+        army_number = str(army_number_raw).strip() if army_number_raw is not None else None
+        if army_number == "":
+            army_number = None
+
+        if army_number is not None and len(army_number) > 64:
+            raise ValidationError("Army number must be 64 characters or fewer")
+
+        if army_number is not None:
+            table_name = target_race.table_name
+            check_sql = text(f"""
+                SELECT COUNT(*) as count FROM "{table_name}"
+                WHERE race_id = :race_id AND army_number = :army_number AND id != :participant_id
+            """)
+            result = db.execute(check_sql, {
+                "race_id": str(target_race.id),
+                "army_number": army_number,
+                "participant_id": participant_id
+            }).fetchone()
+
+            if result and result[0] > 0:
+                raise ConflictError(
+                    f"Army number {army_number} is already assigned to another participant in this race"
+                )
+
+        update_fields.append("army_number = :army_number")
+        update_values["army_number"] = army_number
     
     # Handle other fields
     if "age" in payload:
@@ -1490,7 +1599,7 @@ async def update_participant(
         UPDATE "{table_name}"
         SET {", ".join(update_fields)}
         WHERE id = :participant_id
-        RETURNING id, race_id, rfid_tag, encrypted_name, age, gender, category, registered_at, encryption_key_id
+        RETURNING id, race_id, rfid_tag, army_number, encrypted_name, age, gender, category, registered_at, encryption_key_id
     """)
     
     result = db.execute(update_sql, update_values).fetchone()
@@ -1508,6 +1617,7 @@ async def update_participant(
         "id": str(result.id),
         "race_id": str(result.race_id),
         "rfid_tag": str(result.rfid_tag),
+        "army_number": result.army_number,
         "encrypted_name": str(result.encrypted_name),
         "encryption_key": key,
         "encryption_key_id": str(result.encryption_key_id) if result.encryption_key_id else None,

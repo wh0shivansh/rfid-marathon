@@ -152,8 +152,8 @@ export function openRaceEditModal(race) {
                   <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📡 RFID Placement Mode</span>
                 </label>
                 <select data-field="rfid_placement_mode" ${canEditMode ? '' : 'disabled'} style="padding: 12px 14px; font-size: 14px; border-radius: 6px; border: 2px solid #334155; width:100%; background: #0f172a; color: #e2e8f0;">
-                  <option value="end_intersection">Dual End antennas (intersection, no mid check)</option>
-                  <option value="mid_end_reader_diff">Mid + End readers (reader differentiation)</option>
+                  <option value="end_intersection">Dual End antennas (no mid check)</option>
+                  <option value="mid_end_reader_diff">Mid + End readers (mid check)</option>
                 </select>
                 ${canEditMode ? '' : '<div style="margin-top: 6px; color: #94a3b8; font-size: 12px;">Mode can be changed only before race start.</div>'}
               </div>

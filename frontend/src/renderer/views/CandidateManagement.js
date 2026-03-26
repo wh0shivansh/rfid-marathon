@@ -38,9 +38,22 @@ export function renderCandidateManagement(races = [], participants = [], selecte
           <p style="color: #64748b; font-size: 14px; margin-top: 8px;">Add a candidate to get started.</p>
         </div>
       ` : `
+        <div style="margin-bottom: 12px; display: flex; gap: 12px; align-items: center;">
+          <input
+            id="candidate-search-input"
+            type="text"
+            placeholder="Search by name or army number"
+            style="flex: 1; padding: 11px 14px; background: #0f172a; border: 2px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.95em;"
+          />
+          <label style="display: flex; align-items: center; gap: 8px; color: #cbd5e1; font-size: 13px; white-space: nowrap; user-select: none;">
+            <input id="candidate-hide-locked-checkbox" type="checkbox" checked style="accent-color: #3b82f6; width: 16px; height: 16px;">
+            Hide completed
+          </label>
+        </div>
+
         <div style="margin-bottom: 16px; padding: 12px; background: #1e293b; border-radius: 6px; border-left: 4px solid #3b82f6;">
           <div style="color: #94a3b8; font-size: 0.9em;">
-            Showing <strong style="color: #e2e8f0;">${filteredParticipants.length}</strong> candidate${filteredParticipants.length !== 1 ? 's' : ''}
+            Showing <strong id="candidate-visible-count" style="color: #e2e8f0;">${filteredParticipants.length}</strong> candidate${filteredParticipants.length !== 1 ? 's' : ''}
             ${selectedRaceId ? (() => {
               const race = races.find(r => String(r.id) === String(selectedRaceId));
               return race ? ` for <strong style="color: #e2e8f0;">${race.name}</strong>` : '';
@@ -53,9 +66,11 @@ export function renderCandidateManagement(races = [], participants = [], selecte
             const race = races.find(r => r.id === p.race_id);
             const displayName = p.decryptedName || p.name || (p.encrypted_name ? p.encrypted_name.substring(0, 10) + "..." : 'Unknown');
             const canEdit = race && race.status === 'created';
+            const searchName = String(displayName || '').replace(/"/g, '&quot;').toLowerCase();
+            const searchArmy = String(p.army_number || '').replace(/"/g, '&quot;').toLowerCase();
             
             return `
-              <div style="background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 16px; transition: all 0.3s ease; display: flex; align-items: center; gap: 20px;" class="candidate-card">
+              <div style="background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 16px; transition: all 0.3s ease; display: flex; align-items: center; gap: 20px;" class="candidate-card" data-search-name="${searchName}" data-search-army="${searchArmy}" data-locked="${canEdit ? '0' : '1'}">
                 <!-- Candidate Info -->
                 <div style="flex: 1; display: grid; grid-template-columns: 2fr 1.2fr 1fr 1fr 0.8fr 0.8fr 1.5fr; gap: 16px; align-items: center;">
                   <!-- Name & Race -->

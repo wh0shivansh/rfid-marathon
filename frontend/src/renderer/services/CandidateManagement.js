@@ -131,6 +131,23 @@ export function openCandidateEditModal(participant) {
             </div>
           </div>
 
+          <div style="display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px;">
+            <div class="dark-form-group">
+              <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">🪖 Army Number</span>
+              </label>
+              <input type="text" id="candidate-army-number" placeholder="Army number" style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%;">
+            </div>
+
+            <div class="dark-form-group">
+              <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                <span style="color: #cbd5e1; font-weight: 600; font-size: 13px;">📡 RFID Tag</span>
+                <span style="color: #ef4444; font-weight: 700;">*</span>
+              </label>
+              <input type="text" id="candidate-rfid" required placeholder="Hexadecimal RFID" style="padding: 12px 14px; font-size: 15px; border-radius: 6px; border: 2px solid #334155; transition: all 0.3s ease; width:100%; text-transform: uppercase; font-family: monospace;">
+            </div>
+          </div>
+
           <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; padding-top: 16px; border-top: 1px solid #334155;">
             <button type="button" data-action="cancel" class="dark-btn-secondary" style="padding: 12px 28px; font-size: 15px; font-weight: 600; border-radius: 6px;">Cancel</button>
             <button type="submit" class="dark-btn-primary" style="padding: 12px 28px; font-size: 15px; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
@@ -164,10 +181,14 @@ export function openCandidateEditModal(participant) {
   const nameEl = document.getElementById('candidate-name');
   const ageEl = document.getElementById('candidate-age');
   const genderEl = document.getElementById('candidate-gender');
+  const armyNumberEl = document.getElementById('candidate-army-number');
+  const rfidEl = document.getElementById('candidate-rfid');
 
   if (nameEl) nameEl.value = participant.decryptedName || participant.name || '';
   if (ageEl) ageEl.value = participant.age || '';
   if (genderEl) genderEl.value = participant.gender || '';
+  if (armyNumberEl) armyNumberEl.value = participant.army_number || '';
+  if (rfidEl) rfidEl.value = (participant.rfid || participant.rfid_tag || '').toUpperCase();
 
   if (form) {
     form.addEventListener('submit', async (e) => {
@@ -176,10 +197,56 @@ export function openCandidateEditModal(participant) {
         name: nameEl.value.trim(),
         age: ageEl.value ? Number(ageEl.value) : null,
         gender: genderEl.value,
+        army_number: armyNumberEl ? (armyNumberEl.value.trim() || null) : null,
+        rfid_tag: rfidEl && rfidEl.value ? rfidEl.value.trim().toUpperCase() : undefined,
       };
       cleanup();
       await updateCandidate(participant.id, updates);
     });
+  }
+}
+
+function applyCandidateSearchFilter() {
+  const searchInput = document.getElementById('candidate-search-input');
+  const hideLockedCheckbox = document.getElementById('candidate-hide-locked-checkbox');
+  const cards = document.querySelectorAll('.candidate-card');
+  const visibleCountEl = document.getElementById('candidate-visible-count');
+
+  if (!searchInput || !cards.length) {
+    return;
+  }
+
+  const term = String(searchInput.value || '').trim().toLowerCase();
+
+  const applyFilter = (hideLocked) => {
+    let visibleCount = 0;
+    cards.forEach((card) => {
+      const name = String(card.getAttribute('data-search-name') || '').toLowerCase();
+      const army = String(card.getAttribute('data-search-army') || '').toLowerCase();
+      const isLocked = String(card.getAttribute('data-locked') || '0') === '1';
+      const matchesSearch = !term || name.includes(term) || army.includes(term);
+      const matchesLockedFilter = !(hideLocked && isLocked);
+      const matches = matchesSearch && matchesLockedFilter;
+      card.style.display = matches ? 'flex' : 'none';
+      if (matches) {
+        visibleCount += 1;
+      }
+    });
+    return visibleCount;
+  };
+
+  let hideLocked = hideLockedCheckbox ? Boolean(hideLockedCheckbox.checked) : false;
+  let visibleCount = applyFilter(hideLocked);
+
+  // If hiding completed candidates yields no results, automatically show them.
+  if (hideLocked && visibleCount === 0 && hideLockedCheckbox) {
+    hideLockedCheckbox.checked = false;
+    hideLocked = false;
+    visibleCount = applyFilter(hideLocked);
+  }
+
+  if (visibleCountEl) {
+    visibleCountEl.textContent = String(visibleCount);
   }
 }
 
@@ -191,6 +258,18 @@ export function attachCandidateManagementHandlers() {
   const { state, candidateManagementSelectedRaceId, fetchParticipants, render } = window.appContext;
   
   if (state.view !== 'candidate-management') return;
+
+  const candidateSearchInput = document.getElementById('candidate-search-input');
+  const hideLockedCheckbox = document.getElementById('candidate-hide-locked-checkbox');
+  if (candidateSearchInput) {
+    candidateSearchInput.addEventListener('input', applyCandidateSearchFilter);
+  }
+  if (hideLockedCheckbox) {
+    hideLockedCheckbox.addEventListener('change', applyCandidateSearchFilter);
+  }
+  if (candidateSearchInput || hideLockedCheckbox) {
+    applyCandidateSearchFilter();
+  }
 
   // Race filter dropdown
   const raceFilterDropdown = document.getElementById('candidate-race-filter-dropdown');
